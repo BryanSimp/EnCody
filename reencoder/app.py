@@ -96,6 +96,8 @@ def create_app(db=None, start_worker=True):
             "scanning": worker.scanning,
             "manual": worker.manual,
             "jellyfin_busy": worker.jf_busy,
+            "throttled": worker.throttled(s),
+            "system": worker.sysmon.latest,
             "window": {"open": bool(win), "end": win[1].isoformat() if win else None,
                        "next": nxt[0].isoformat() if nxt else None,
                        "stopped": bool(win) and worker.stopped_window == win[0]},

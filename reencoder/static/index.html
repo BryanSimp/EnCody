@@ -111,6 +111,9 @@
     <div id="days"></div>
     <label>Start <input name="schedule_start" type="time"></label>
     <label>End <input name="schedule_end" type="time"></label>
+    <label><input type="checkbox" name="daytime_enabled"> Daytime mode: keep encoding outside the window, throttled</label>
+    <label>Daytime speed limit (%) <input name="daytime_limit_pct" type="number" min="10" max="100">
+      <small>Share of time ffmpeg runs during the day (it runs, then pauses, in a 20 s cycle). 50 = about half the GPU and half the speed. The window above always runs at full speed, and so does Run now.</small></label>
     <label>When the window ends <select name="window_end_action"><option value="finish">Finish the current file</option><option value="abort">Abort and delete the temp file</option></select></label>
     <label><input type="checkbox" name="dry_run"> Dry run (list what would be encoded, change nothing)</label>
   </fieldset>

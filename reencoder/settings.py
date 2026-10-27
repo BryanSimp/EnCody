@@ -49,6 +49,8 @@ DEFAULTS = {
     "schedule_start": "22:00",
     "schedule_end": "07:00",
     "window_end_action": "finish",  # finish | abort
+    "daytime_enabled": False,  # also encode outside the window, throttled
+    "daytime_limit_pct": 50,   # share of time ffmpeg runs during the day (run/pause cycle)
     "concurrent_jobs": 1,
     "dry_run": True,
     # Integrations (all off by default)
@@ -80,6 +82,7 @@ RANGES = {
     "decode_tail_sec": (0, 36000),
     "trash_days": (0, 3650),
     "concurrent_jobs": (1, 4),
+    "daytime_limit_pct": (10, 100),
 }
 SECRET_KEYS = {"sonarr_key", "radarr_key", "jellyfin_key"}
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")

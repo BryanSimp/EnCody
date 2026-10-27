@@ -108,6 +108,8 @@ class Encode:
         self.stderr = deque(maxlen=40)
         self.aborted = False
         self.paused = False
+        self.paused_total = 0.0
+        self._paused_at = 0.0
 
     @property
     def percent(self):
@@ -146,3 +148,12 @@ class Encode:
         if self.proc and self.proc.poll() is None and on != self.paused:
             self.proc.send_signal(signal.SIGSTOP if on else signal.SIGCONT)
             self.paused = on
+            if on:
+                self._paused_at = time.time()
+            else:
+                self.paused_total += time.time() - self._paused_at
+
+    def active_seconds(self):
+        """Wall seconds ffmpeg actually ran (pauses excluded)."""
+        paused = self.paused_total + (time.time() - self._paused_at if self.paused else 0)
+        return max(0.0, time.time() - self.started - paused)

@@ -40,8 +40,11 @@ async function refreshState() {
   const c = st.counts, q = st.queue;
   $("#cards").innerHTML = [
     ["Total files", c.total], ["Done", c.done], ["To do", c.todo], ["Failed", c.failed], ["Skipped", c.skipped],
+    ["CPU (server)", st.system.cpu == null ? "-" : st.system.cpu.toFixed(0) + "%"],
+    ["RAM (server)", st.system.ram_total ? `${bytes(st.system.ram_used)} / ${bytes(st.system.ram_total)}` : "-"],
+    ["GPU encoder", st.system.gpu.video == null ? (st.jobs.length ? "measuring" : "idle") : st.system.gpu.video.toFixed(0) + "%"],
     ["Space saved", bytes(st.total_saved)], ["Queue size", bytes(q.bytes)],
-    ["Queue ETA", !q.files ? "nothing left" : q.eta ? dur(q.eta) + (q.windows ? ` (${q.windows} nights)` : "") : "after first file"],
+    ["Queue ETA", !q.files ? "nothing left" : q.eta ? dur(q.eta) + (q.windows ? ` (${q.windows} ${q.windows_label})` : "") : "after first file"],
   ].map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join("");
 
   const w = st.window;
@@ -49,6 +52,7 @@ async function refreshState() {
   if (st.manual) txt += "Running now (manual). ";
   else if (w.open && w.stopped) txt += "Stopped for this window. ";
   else if (w.open) txt += `Window open until ${new Date(w.end).toLocaleTimeString()}. `;
+  else if (st.throttled) txt += `Daytime mode: throttled to ${st.settings.daytime_limit_pct}%. `;
   else txt += w.next ? `Next window: ${new Date(w.next).toLocaleString()}. ` : "Schedule off. ";
   if (st.scanning) txt += "Scanning... ";
   if (st.jellyfin_busy) txt += "Paused: Jellyfin is transcoding. ";
@@ -58,7 +62,7 @@ async function refreshState() {
     <div class="job">
       <div><b>${esc(j.display)}</b> <span class="muted">${esc(j.codec)} ${esc(j.res)} ${bytes(j.size)}${j.remux ? " (remux)" : ""}</span></div>
       <div class="bar"><div style="width:${j.percent}%"></div></div>
-      <div class="muted">${j.phase === "verifying" ? "verifying..." : `${j.percent}% | ${Math.round(j.fps)} fps | ${j.speed.toFixed(1)}x | file ETA ${dur(j.eta)}`}${j.paused ? " | PAUSED" : ""}</div>
+      <div class="muted">${j.phase === "verifying" ? "verifying..." : `${j.percent}% | ${Math.round(j.fps)} fps | ${j.speed.toFixed(1)}x | file ETA ${dur(j.eta)}`}${st.jellyfin_busy ? " | PAUSED (Jellyfin)" : st.throttled ? ` | throttled ${st.settings.daytime_limit_pct}%` : ""}</div>
     </div>`).join("");
 }
 
