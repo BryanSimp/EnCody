@@ -9,3 +9,4 @@ config
 *.db
 *.md
 docker-compose*.yml
+deploy

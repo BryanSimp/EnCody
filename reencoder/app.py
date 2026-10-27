@@ -32,7 +32,7 @@ def create_app(db=None, start_worker=True):
     @asynccontextmanager
     async def lifespan(app):
         roots = config.media_roots()
-        log.info(f"Reencoder starting. Media roots: {', '.join(roots) or 'none found'}")
+        log.info(f"Encody starting. Media roots: {', '.join(roots) or 'none found'}")
         if start_worker:
             worker.start()
         yield
@@ -56,7 +56,7 @@ def create_app(db=None, start_worker=True):
                 ok = False
         if not ok:
             return Response("Authentication required", status_code=401,
-                            headers={"WWW-Authenticate": 'Basic realm="reencoder"'})
+                            headers={"WWW-Authenticate": 'Basic realm="encody"'})
         return await call_next(request)
 
     @app.get("/health")

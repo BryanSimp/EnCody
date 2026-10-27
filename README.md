@@ -1,4 +1,4 @@
-# Reencoder
+# Encody
 
 One small Docker container that re-encodes your media library to AV1 (or HEVC/H.264) on an Intel GPU,
 overnight, one file at a time, and only replaces a file after the new one has been verified.
@@ -14,22 +14,22 @@ Stack: Python 3.12, FastAPI, SQLite, jellyfin-ffmpeg (Intel QSV). No Redis, no C
 
 ## 1. Deploy
 
-1. Add the service from [`docker-compose.example.yml`](docker-compose.example.yml) to your media stack.
-   Set a real `UI_PASS`.
-2. `mkdir -p /home/bryan/reencoder` (it holds the database and logs).
-3. Make the image pullable (see [GHCR access](#ghcr-access)), then:
-   ```sh
-   docker compose pull reencoder && docker compose up -d reencoder
-   ```
+Encody runs as its own stack: [`deploy/docker-compose.yml`](deploy/docker-compose.yml).
+
+1. `mkdir -p /home/bryan/encody` (it holds the database and logs).
+2. Make the image pullable (see [GHCR access](#ghcr-access)).
+3. Portainer → Stacks → Add stack → name `encody` → paste `deploy/docker-compose.yml` → add the environment
+   variable `UI_PASS` (and `UI_USER` if you don't want `admin`) → Deploy.
+   Without Portainer: `UI_PASS=... docker compose -f deploy/docker-compose.yml up -d`.
 4. **Check the GPU first** (build step 1):
    ```sh
-   docker exec -it reencoder qsv-test.sh
+   docker exec -it encody qsv-test.sh
    ```
    It prints the devices, the `vainfo` AV1 profiles and encodes a 20 s 1080p test clip with `av1_qsv`.
    It must end with `PASS`. While it runs, `sudo intel_gpu_top` on the host (or
-   `docker exec -it reencoder intel_gpu_top`) should show the *Video* engine busy. Expect roughly 100+ fps for 1080p.
+   `docker exec -it encody intel_gpu_top`) should show the *Video* engine busy. Expect roughly 100+ fps for 1080p.
    If it fails, see [Troubleshooting](#troubleshooting) and do not go further.
-5. Open `https://reencoder.brysimp.com` and log in with `UI_USER` / `UI_PASS`.
+5. Open `https://encody.brysimp.com` and log in with `UI_USER` / `UI_PASS`.
 
 ### First test (recommended order)
 
@@ -42,23 +42,27 @@ Stack: Python 3.12, FastAPI, SQLite, jellyfin-ffmpeg (Intel QSV). No Redis, no C
 
 ### Updating
 
-```sh
-docker compose pull reencoder && docker compose up -d reencoder
-```
-A restart mid-encode is safe (see [Safety](#safety)).
+Automatic: the container carries `com.centurylinklabs.watchtower.enable=true`, so the watchtower already running in
+your game manager stack pulls the new `:latest` within 5 minutes of a push to `main` and restarts Encody.
+Manual: Portainer → stack → *Update the stack* with *Re-pull image*, or
+`docker compose -f deploy/docker-compose.yml pull && docker compose -f deploy/docker-compose.yml up -d`.
+A restart mid-encode is safe (see [Safety](#safety)): the current file is redone later, the original is untouched.
+To avoid that wasted work, remove the watchtower label and update by hand during the day.
 
 ### GHCR access
 
-The GitHub Actions workflow pushes `ghcr.io/bryansimp/reencoder:latest` and `:<commit sha>` on every push to `main`.
+The GitHub Actions workflow pushes `ghcr.io/bryansimp/encody:latest` and `:<commit sha>` on every push to `main`.
 Your server needs to be able to pull it. Pick one:
 
-- **Make the package public (simplest):** GitHub → your profile → *Packages* → `reencoder` →
+- **Make the package public (simplest):** GitHub → your profile → *Packages* → `encody` →
   *Package settings* → *Change visibility* → *Public*. Nothing to do on the server. The code repo can stay private.
 - **Keep it private:** GitHub → Settings → Developer settings → Personal access tokens → *Tokens (classic)* →
   new token with only `read:packages`. On the server, once:
   ```sh
-  echo <TOKEN> | docker login ghcr.io -u bryansimp --password-stdin
+  echo <TOKEN> | sudo docker login ghcr.io -u bryansimp --password-stdin
   ```
+  You already did this for the game manager images (`/root/.docker/config.json`, which watchtower also reads), so
+  the same login covers Encody as long as that token has `read:packages`.
 
 ---
 
@@ -188,7 +192,7 @@ least the original's size free.
 
 ## 4. Logs
 
-Plain lines on stdout (`docker logs -f reencoder`), a rolling file in `/config/logs/reencoder.log` (5 MB × 4) and the
+Plain lines on stdout (`docker logs -f encody`), a rolling file in `/config/logs/reencoder.log` (5 MB × 4) and the
 last 500 lines in the UI:
 
 ```
@@ -223,19 +227,19 @@ The GPU: `/dev/dri` device + `group_add: ["993"]` (the host's `render` group, `g
 
 | Problem | Check |
 |---|---|
-| `qsv-test.sh` fails, "Failed to initialise VAAPI" / "Permission denied" | `ls -ln /dev/dri` on the host; the render device group must match `group_add` (993). Check `docker exec reencoder id` shows 993. |
+| `qsv-test.sh` fails, "Failed to initialise VAAPI" / "Permission denied" | `ls -ln /dev/dri` on the host; the render device group must match `group_add` (993). Check `docker exec encody id` shows 993. |
 | `vainfo` lists no `VAProfileAV1` | Host kernel too old for Arc (needs 6.2+), or `i915`/`xe` not loaded. `dmesg | grep -i -E "i915|xe"`. Jellyfin AV1 transcoding failing too points to the host. |
 | Encode works but slow (< 50 fps at 1080p) | Run `intel_gpu_top`: if *Video* is idle, it is falling back. Most decode is done on the CPU (more robust); 4K HEVC sources are CPU-bound on decode. |
 | Files never get picked up | *Failed / skipped* tab shows the reason. Most common: hardlinked (still seeding), modified recently, below minimum size. |
 | Everything "no savings" | Quality number too low (= high quality). Raise it by 2-4. |
 | "only X free on the drive" | Free up space on that drive; the file is retried after the next scan. |
 | Login loop behind Cloudflare Access | Basic auth and Access both work; make sure Traefik passes the `Authorization` header (it does by default). |
-| UI says "Connection problem" | `docker logs reencoder`; `curl http://<container>:8080/health`. |
+| UI says "Connection problem" | `docker logs encody`; `curl http://<container>:8080/health`. |
 
 Manual QSV test without the script:
 ```sh
-docker exec -it reencoder vainfo --display drm --device /dev/dri/renderD128
-docker exec -it reencoder ffmpeg -hide_banner -init_hw_device vaapi=va:/dev/dri/renderD128 \
+docker exec -it encody vainfo --display drm --device /dev/dri/renderD128
+docker exec -it encody ffmpeg -hide_banner -init_hw_device vaapi=va:/dev/dri/renderD128 \
   -init_hw_device qsv=qs@va -filter_hw_device qs -f lavfi -i testsrc2=size=1920x1080:rate=24:duration=20 \
   -vf format=nv12,hwupload=extra_hw_frames=64 -c:v av1_qsv -global_quality 26 -preset slow -y /tmp/t.mkv
 ```
