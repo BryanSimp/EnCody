@@ -6,7 +6,7 @@ import threading
 import time
 from collections import deque
 
-from . import config, paths
+from . import config, integrations, paths
 
 MUXERS = {".mkv": "matroska", ".mp4": "mp4", ".m4v": "mp4", ".mov": "mov"}
 SVT_PRESETS = {"veryslow": 2, "slower": 3, "slow": 4, "medium": 6, "fast": 8, "faster": 10, "veryfast": 12}
@@ -21,8 +21,18 @@ def is_tv(path):
     return first in TV_DIRS
 
 
+TIERS = {"animation": "quality_animation", "tv": "quality_tv", "movie": "quality"}
+
+
+def tier(path):
+    """animation (Jellyfin genre) | tv (under tvshows/) | movie"""
+    if integrations.is_animated(path):
+        return "animation"
+    return "tv" if is_tv(path) else "movie"
+
+
 def quality_for(path, s):
-    return s["quality_tv"] if is_tv(path) else s["quality"]
+    return s[TIERS[tier(path)]]
 
 
 def output_ext(path, s):

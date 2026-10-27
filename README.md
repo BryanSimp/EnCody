@@ -74,8 +74,10 @@ All settings are in the UI and stored in `/config/reencoder.db`.
 | Setting | Default | Notes |
 |---|---|---|
 | Video codec | `av1_qsv` | `hevc_qsv`, `h264_qsv` (Intel GPU) or `libsvtav1` (CPU, slow fallback). |
-| Quality: movies | `26` | Used for everything not under `tvshows/`. `global_quality` for QSV, CRF for `libsvtav1`. Lower = better and bigger. av1_qsv: try 22-24 for movies. |
-| Quality: TV shows | `26` | Used for files under `<drive>/tvshows/`. av1_qsv: 26-28 is fine for TV and animation. The `START` log line shows the `q=` used. |
+| Quality: live-action movies | `26` | Everything not under `tvshows/` and not animated. `global_quality` for QSV, CRF for `libsvtav1`. Lower = better and bigger. av1_qsv: try 22-23. |
+| Quality: live-action TV | `26` | Files under `<drive>/tvshows/`. av1_qsv: try 24-25. |
+| Quality: animation | `26` | Animated movies and shows, detected from Jellyfin genres (below). av1_qsv: try 27-28. |
+| Detect animation | off | Uses Jellyfin genres `Animation` / `Anime`. Needs the Jellyfin URL + API key (Integrations). Without it, animated titles use the movie/TV value. |
 | Preset | `slow` | QSV: `veryfast` … `veryslow`. SVT-AV1: `0`-`13` (QSV names are mapped). |
 | Bit depth | Match source | 10-bit sources stay 10-bit. HDR is always 10-bit. `h264_qsv` is always 8-bit. |
 | Also convert container to MKV | off | When on, every non-MKV file becomes `.mkv` (files already in the target codec are remuxed, no re-encode). |
@@ -142,6 +144,11 @@ window opens or you press *Run now*). Nothing is encoded, renamed or deleted.
 - **Refresh after replace:** after a run that replaced files, sends `RescanSeries` to Sonarr, `RescanMovie` to
   Radarr and `Library/Refresh` to Jellyfin (only for the ones with URL + API key filled in). Use container names
   on the `proxy` network, e.g. `http://sonarr:8989`.
+- **Detect animation:** on every scan Encody asks Jellyfin (`/Items`, one call) which series and movies have the
+  genre `Animation` or `Anime`, and uses the animation quality for them. Jellyfin uses the same `/data/media*`
+  paths, so no path mapping is needed. If Jellyfin is down, the previous list is kept. Check the result in the
+  Queue tab (Quality column) or the `q=.. (animation|tv|movie)` part of `START` and `DRY RUN` log lines.
+  Wrong genre on a title? Fix it in Jellyfin (Edit metadata → Genres), then *Scan now*.
 - **Pause while Jellyfin transcodes:** checks Jellyfin `/Sessions` every 30 s. While someone is being video-transcoded,
   ffmpeg is paused (SIGSTOP) and no new file starts; it resumes when they stop.
 

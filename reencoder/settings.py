@@ -15,8 +15,11 @@ DEFAULTS = {
     "excludes": [],
     # Encode
     "codec": "av1_qsv",
-    "quality": 26,            # movies and anything not under tvshows/. global_quality for QSV, CRF for libsvtav1
-    "quality_tv": 26,         # files under <drive>/tvshows/
+    # global_quality for QSV, CRF for libsvtav1. Three tiers:
+    "quality": 26,            # live-action movies (and anything not under tvshows/)
+    "quality_tv": 26,         # live-action TV: files under <drive>/tvshows/
+    "quality_animation": 26,  # animated movies and shows (needs detect_animation + Jellyfin URL/key)
+    "detect_animation": False,  # use Jellyfin genres (Animation/Anime) to find animated titles
     "preset": "slow",         # QSV: veryfast..veryslow. SVT-AV1: 0-13 (names are mapped)
     "bit_depth": "auto",      # auto (match source) | 10 | 8
     "convert_to_mkv": False,  # also remux non-MKV files even if already the target codec
@@ -65,6 +68,7 @@ ENUMS = {
 RANGES = {
     "quality": (1, 63),
     "quality_tv": (1, 63),
+    "quality_animation": (1, 63),
     "skip_recent_minutes": (0, 100000),
     "min_size_mb": (0, 1000000),
     "max_failures": (1, 100),
