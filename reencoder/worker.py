@@ -184,6 +184,9 @@ class Worker:
                 log.info("SCAN skipped: no folders selected.")
                 return
             log.info(f"SCAN started: {len(s['folders'])} folder(s)")
+            n = integrations.refresh_animation(s)
+            if n is not None:
+                log.info(f"Jellyfin: {n} animated series/movies found (quality {s['quality_animation']})")
             r = scanner.scan(self.db, s, running=self.jobs)
             c = r["counts"]
             q = self.queue_totals()
@@ -286,7 +289,8 @@ class Worker:
         for r in rows:
             p = r["probe"] or {}
             log.info(f"DRY RUN would encode {paths.display(r['path'])}  {p.get('codec', '?')} "
-                     f"{media.resolution(p)} {hb(r['size'])}" + (f"  ({r['reason']})" if r["reason"] else ""))
+                     f"{media.resolution(p)} {hb(r['size'])}  q={encoder.quality_for(r['path'], s)} "
+                     f"({encoder.tier(r['path'])})" + (f"  ({r['reason']})" if r["reason"] else ""))
 
     def _log_progress(self, s, now):
         q = self.queue_eta(s, now)
@@ -328,7 +332,9 @@ class Worker:
         total = self.run_started + self.queue_totals()["files"]
         p = job.probe
         log.info(f"START ({self.run_started}/{total}) {paths.display(job.path)}  {p['codec']} "
-                 f"{media.resolution(p)} {hb(job.size)}" + ("  [remux only]" if job.remux else ""))
+                 f"{media.resolution(p)} {hb(job.size)}"
+                 + ("  [remux only]" if job.remux else
+                    f"  q={encoder.quality_for(job.path, s)} ({encoder.tier(job.path)})"))
         self.last_progress = time.time()
         threading.Thread(target=self._run_job, args=(job, dict(s)), name="encode", daemon=True).start()
 

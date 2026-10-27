@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from . import config, log as logmod, paths, schedule
+from . import config, encoder, log as logmod, paths, schedule
 from .db import DB
 from .settings import DEFAULTS, SECRET_KEYS, validate
 from .worker import Worker
@@ -161,7 +161,8 @@ def create_app(db=None, start_worker=True):
         for r in rows:
             p = r.pop("probe", None) or {}
             out.append(dict(r, display=paths.display(r["path"]), codec=p.get("codec", ""),
-                            duration=p.get("duration", 0)))
+                            duration=p.get("duration", 0), tier=encoder.tier(r["path"]),
+                            quality=encoder.quality_for(r["path"], s)))
         return out
 
     @app.get("/api/history")

@@ -1,6 +1,7 @@
 """Optional Sonarr/Radarr/Jellyfin calls. All off by default."""
 import json
 import logging
+import os
 import urllib.request
 
 log = logging.getLogger("reencoder")
@@ -45,3 +46,46 @@ def jellyfin_transcoding(s):
     # Only video transcodes use the GPU; remux/direct stream sessions do not.
     return any(x.get("NowPlayingItem") and x.get("TranscodingInfo")
                and not x["TranscodingInfo"].get("IsVideoDirect") for x in sessions)
+
+
+ANIMATION_GENRES = {"animation", "anime"}
+_animated_dirs = set()   # series folders Jellyfin tags as animation
+_animated_files = set()  # movie paths without extension (survives .avi -> .mkv)
+
+
+def refresh_animation(s):
+    """Load the animated series/movies from Jellyfin. Returns how many, or None if off or failed
+    (on failure the previous list is kept)."""
+    global _animated_dirs, _animated_files
+    if not (s["detect_animation"] and s["jellyfin_url"] and s["jellyfin_key"]):
+        _animated_dirs, _animated_files = set(), set()
+        return None
+    try:
+        data = _call("GET", s["jellyfin_url"].rstrip("/") +
+                     "/Items?Recursive=true&IncludeItemTypes=Movie,Series&Fields=Path,Genres",
+                     {"X-Emby-Token": s["jellyfin_key"]}, timeout=60) or {}
+    except Exception as e:
+        log.warning(f"Jellyfin genre lookup failed, keeping previous list: {e}")
+        return None
+    dirs, files = set(), set()
+    for item in data.get("Items", []):
+        path = item.get("Path")
+        if not path or not ANIMATION_GENRES & {g.lower() for g in item.get("Genres") or []}:
+            continue
+        if item.get("Type") == "Series":
+            dirs.add(path.rstrip("/"))
+        else:
+            files.add(os.path.splitext(path)[0])
+    _animated_dirs, _animated_files = dirs, files
+    return len(dirs) + len(files)
+
+
+def is_animated(path):
+    if os.path.splitext(path)[0] in _animated_files:
+        return True
+    d = os.path.dirname(path)
+    while d and d != os.sep:
+        if d in _animated_dirs:
+            return True
+        d = os.path.dirname(d)
+    return False

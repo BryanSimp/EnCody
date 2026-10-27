@@ -66,8 +66,8 @@ async function refreshState() {
 async function refreshTab() {
   if (tab === "queue") {
     const rows = await api("/api/files?status=todo&limit=300");
-    $("#queue").innerHTML = rows.map((r) => `<tr><td>${esc(r.display)}</td><td>${esc(r.codec)}</td><td>${bytes(r.size)}</td><td>${dur(r.duration)}</td><td>${esc(r.reason)}${r.failures ? ` (failed ${r.failures}x)` : ""}</td></tr>`).join("")
-      || "<tr><td colspan=5>Nothing to do. Pick folders and press Scan now.</td></tr>";
+    $("#queue").innerHTML = rows.map((r) => `<tr><td>${esc(r.display)}</td><td>${esc(r.codec)}</td><td>${bytes(r.size)}</td><td>${dur(r.duration)}</td><td>${r.quality} <span class="muted">${esc(r.tier)}</span></td><td>${esc(r.reason)}${r.failures ? ` (failed ${r.failures}x)` : ""}</td></tr>`).join("")
+      || "<tr><td colspan=6>Nothing to do. Pick folders and press Scan now.</td></tr>";
   } else if (tab === "history") {
     const rows = await api("/api/history");
     $("#history").innerHTML = rows.map((h) => `<tr><td>${when(h.finished)}</td><td>${esc(h.display)}</td><td class="r-${esc(h.result)}">${esc(h.result)}</td><td>${bytes(h.orig_size)}</td><td>${h.new_size ? bytes(h.new_size) : ""}</td><td>${h.saved ? bytes(h.saved) : ""}</td><td>${dur(h.finished - h.started)}</td><td>${esc(h.message)}</td></tr>`).join("");

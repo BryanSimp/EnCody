@@ -33,7 +33,7 @@
 
 <section class="tab" id="tab-queue">
   <p class="hint">Files that will be encoded next, in order. With dry run on, this is the full "would encode" list.</p>
-  <table><thead><tr><th>File</th><th>Codec</th><th>Size</th><th>Length</th><th>Note</th></tr></thead><tbody id="queue"></tbody></table>
+  <table><thead><tr><th>File</th><th>Codec</th><th>Size</th><th>Length</th><th>Quality</th><th>Note</th></tr></thead><tbody id="queue"></tbody></table>
 </section>
 
 <section class="tab hidden" id="tab-history">
@@ -66,8 +66,12 @@
       <option value="hevc_qsv">hevc_qsv (Intel GPU)</option>
       <option value="h264_qsv">h264_qsv (Intel GPU)</option>
       <option value="libsvtav1">libsvtav1 (CPU, slow fallback)</option></select></label>
-    <label>Quality <input name="quality" type="number" min="1" max="63">
-      <small>Lower = better quality, bigger file. av1_qsv global_quality: try 24-28. hevc_qsv: 22-26. libsvtav1 CRF: 28-34.</small></label>
+    <p class="hint">Quality: lower number = better quality, bigger file. av1_qsv: try 22-23 live-action movies, 24-25 live-action TV, 27-28 animation. libsvtav1 CRF: add about 6.</p>
+    <label>Quality: live-action movies (and anything not in tvshows/) <input name="quality" type="number" min="1" max="63"></label>
+    <label>Quality: live-action TV (files under tvshows/) <input name="quality_tv" type="number" min="1" max="63"></label>
+    <label>Quality: animation (movies and shows) <input name="quality_animation" type="number" min="1" max="63">
+      <small>Needs "Detect animation" below plus the Jellyfin URL and API key under Integrations.</small></label>
+    <label><input type="checkbox" name="detect_animation"> Detect animation using Jellyfin genres (Animation / Anime). Refreshed on every scan.</label>
     <label>Preset <input name="preset">
       <small>QSV: veryfast, faster, fast, medium, slow, slower, veryslow. SVT-AV1: 0-13 (names are mapped).</small></label>
     <label>Bit depth <select name="bit_depth"><option value="auto">Match source</option><option value="10">Always 10-bit</option><option value="8">8-bit (HDR is always 10-bit)</option></select></label>

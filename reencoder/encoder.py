@@ -6,10 +6,33 @@ import threading
 import time
 from collections import deque
 
-from . import config
+from . import config, integrations, paths
 
 MUXERS = {".mkv": "matroska", ".mp4": "mp4", ".m4v": "mp4", ".mov": "mov"}
 SVT_PRESETS = {"veryslow": 2, "slower": 3, "slow": 4, "medium": 6, "fast": 8, "faster": 10, "veryfast": 12}
+
+
+TV_DIRS = {"tvshows", "tv", "tv shows", "shows", "series"}
+
+
+def is_tv(path):
+    """True for files under <drive>/tvshows/ (first folder below the media root)."""
+    first = paths.display(path).split(os.sep)[0].lower()
+    return first in TV_DIRS
+
+
+TIERS = {"animation": "quality_animation", "tv": "quality_tv", "movie": "quality"}
+
+
+def tier(path):
+    """animation (Jellyfin genre) | tv (under tvshows/) | movie"""
+    if integrations.is_animated(path):
+        return "animation"
+    return "tv" if is_tv(path) else "movie"
+
+
+def quality_for(path, s):
+    return s[TIERS[tier(path)]]
 
 
 def output_ext(path, s):
@@ -31,6 +54,7 @@ def build_cmd(src, dst, p, s, remux=False):
     ext = os.path.splitext(dst)[1].lower()
     qsv = s["codec"].endswith("_qsv")
     vi = p["video_index"]
+    q = str(quality_for(src, s))
     ten = p["ten_bit"] if s["bit_depth"] == "auto" else s["bit_depth"] == "10"
     if p["hdr"]:
         ten = True  # never drop HDR to 8-bit
@@ -51,11 +75,11 @@ def build_cmd(src, dst, p, s, remux=False):
         if qsv:
             fmt = "p010le" if ten else "nv12"
             cmd += [f"-filter:{v}", f"format={fmt},hwupload=extra_hw_frames=64",
-                    f"-global_quality:{v}", str(s["quality"]), f"-preset:{v}", s["preset"]]
+                    f"-global_quality:{v}", q, f"-preset:{v}", s["preset"]]
         else:
             preset = s["preset"] if s["preset"].isdigit() else str(SVT_PRESETS.get(s["preset"], 6))
             cmd += [f"-pix_fmt:{v}", "yuv420p10le" if ten else "yuv420p",
-                    f"-crf:{v}", str(s["quality"]), f"-preset:{v}", preset]
+                    f"-crf:{v}", q, f"-preset:{v}", preset]
         color = p.get("color") or {}
         for opt, key in (("color_primaries", "color_primaries"), ("color_trc", "color_transfer"),
                          ("colorspace", "color_space")):
