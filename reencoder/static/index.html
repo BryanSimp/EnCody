@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Encody</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Encody</h1>
+  <div class="buttons">
+    <button id="run">Run now</button>
+    <button id="stop" class="danger">Stop</button>
+    <button id="scan">Scan now</button>
+  </div>
+</header>
+
+<section id="status">
+  <div class="cards" id="cards"></div>
+  <div id="window"></div>
+  <div id="jobs"></div>
+</section>
+
+<nav id="tabs">
+  <button data-tab="queue" class="active">Queue</button>
+  <button data-tab="history">History</button>
+  <button data-tab="failed">Failed / skipped</button>
+  <button data-tab="folders">Folders</button>
+  <button data-tab="settings">Settings</button>
+  <button data-tab="logs">Logs</button>
+</nav>
+
+<section class="tab" id="tab-queue">
+  <p class="hint">Files that will be encoded next, in order. With dry run on, this is the full "would encode" list.</p>
+  <table><thead><tr><th>File</th><th>Codec</th><th>Size</th><th>Length</th><th>Note</th></tr></thead><tbody id="queue"></tbody></table>
+</section>
+
+<section class="tab hidden" id="tab-history">
+  <table><thead><tr><th>Finished</th><th>File</th><th>Result</th><th>Original</th><th>New</th><th>Saved</th><th>Took</th><th>Note</th></tr></thead><tbody id="history"></tbody></table>
+</section>
+
+<section class="tab hidden" id="tab-failed">
+  <p><button id="retry-all">Retry all failed</button></p>
+  <h3>Failed</h3>
+  <table><thead><tr><th>File</th><th>Size</th><th>Tries</th><th>Reason</th><th></th></tr></thead><tbody id="failed"></tbody></table>
+  <h3>No savings</h3>
+  <table><thead><tr><th>File</th><th>Size</th><th>Reason</th><th></th></tr></thead><tbody id="nosave"></tbody></table>
+  <h3>Skipped</h3>
+  <table><thead><tr><th>File</th><th>Size</th><th>Reason</th></tr></thead><tbody id="skipped"></tbody></table>
+</section>
+
+<section class="tab hidden" id="tab-folders">
+  <p class="hint">Tick folders to include. Tick "exclude" to leave a subfolder out. Only <code>/data/media*</code> can be browsed. Changes are saved right away and start a scan.</p>
+  <div id="crumbs"></div>
+  <table><thead><tr><th>Include</th><th>Exclude</th><th>Folder</th></tr></thead><tbody id="dirs"></tbody></table>
+  <h3>Included</h3><ul id="included"></ul>
+  <h3>Excluded</h3><ul id="excluded"></ul>
+</section>
+
+<section class="tab hidden" id="tab-settings">
+<form id="settings">
+  <fieldset><legend>Encode</legend>
+    <label>Video codec <select name="codec">
+      <option value="av1_qsv">av1_qsv (Intel GPU, default)</option>
+      <option value="hevc_qsv">hevc_qsv (Intel GPU)</option>
+      <option value="h264_qsv">h264_qsv (Intel GPU)</option>
+      <option value="libsvtav1">libsvtav1 (CPU, slow fallback)</option></select></label>
+    <label>Quality <input name="quality" type="number" min="1" max="63">
+      <small>Lower = better quality, bigger file. av1_qsv global_quality: try 24-28. hevc_qsv: 22-26. libsvtav1 CRF: 28-34.</small></label>
+    <label>Preset <input name="preset">
+      <small>QSV: veryfast, faster, fast, medium, slow, slower, veryslow. SVT-AV1: 0-13 (names are mapped).</small></label>
+    <label>Bit depth <select name="bit_depth"><option value="auto">Match source</option><option value="10">Always 10-bit</option><option value="8">8-bit (HDR is always 10-bit)</option></select></label>
+    <label><input type="checkbox" name="convert_to_mkv"> Also convert container to MKV (remuxes files already in the target codec too)</label>
+    <label>GPU render device <input name="render_device"></label>
+    <label>Concurrent jobs <input name="concurrent_jobs" type="number" min="1" max="4"></label>
+    <p class="hint">Audio, subtitles, attachments and chapters are always copied (<code>-map 0</code>).</p>
+  </fieldset>
+
+  <fieldset><legend>Skip rules</legend>
+    <label>Also skip these source codecs <input name="skip_codecs" data-list>
+      <small>Comma separated. The target codec is always skipped.</small></label>
+    <label>Skip files modified in the last N minutes <input name="skip_recent_minutes" type="number"></label>
+    <label><input type="checkbox" name="skip_hardlinked"> Skip hardlinked files (likely seeding in Transmission)</label>
+    <label><input type="checkbox" name="skip_hdr"> Skip HDR sources (off = encode HDR10/HLG as 10-bit; Dolby Vision is always skipped)</label>
+    <label>Minimum size (MB) <input name="min_size_mb" type="number"></label>
+    <label>Give up after N failures <input name="max_failures" type="number" min="1"></label>
+    <label>Queue order <select name="sort"><option value="size_desc">Biggest first</option><option value="size_asc">Smallest first</option><option value="path">By path</option></select></label>
+    <label>Scan every N hours (0 = only manual) <input name="scan_interval_hours" type="number"></label>
+  </fieldset>
+
+  <fieldset><legend>Verify and replace</legend>
+    <label>Duration tolerance (seconds) <input name="duration_tol_sec" type="number" step="0.1"></label>
+    <label>Duration tolerance (%) <input name="duration_tol_pct" type="number" step="0.1">
+      <small>The larger of the two is used.</small></label>
+    <label>Require at least N% savings <input name="min_savings_pct" type="number"></label>
+    <label><input type="checkbox" name="decode_test"> Quick decode test of the output</label>
+    <label>Decode test: first N seconds <input name="decode_head_sec" type="number"></label>
+    <label>Decode test: last N seconds <input name="decode_tail_sec" type="number"></label>
+    <label><input type="checkbox" name="delete_original"> Delete original after successful verify
+      <small>Off = originals are kept in <code>.reencoder-trash</code> forever.</small></label>
+    <label>Keep originals N days in .reencoder-trash (0 = delete now) <input name="trash_days" type="number"></label>
+  </fieldset>
+
+  <fieldset><legend>Schedule</legend>
+    <label><input type="checkbox" name="schedule_enabled"> Run on a schedule</label>
+    <div id="days"></div>
+    <label>Start <input name="schedule_start" type="time"></label>
+    <label>End <input name="schedule_end" type="time"></label>
+    <label>When the window ends <select name="window_end_action"><option value="finish">Finish the current file</option><option value="abort">Abort and delete the temp file</option></select></label>
+    <label><input type="checkbox" name="dry_run"> Dry run (list what would be encoded, change nothing)</label>
+  </fieldset>
+
+  <fieldset><legend>Integrations (optional)</legend>
+    <label><input type="checkbox" name="refresh_after_replace"> Ask Sonarr/Radarr/Jellyfin to rescan after a run that replaced files</label>
+    <label>Sonarr URL <input name="sonarr_url" placeholder="http://sonarr:8989"></label>
+    <label>Sonarr API key <input name="sonarr_key" type="password"></label>
+    <label>Radarr URL <input name="radarr_url" placeholder="http://radarr:7878"></label>
+    <label>Radarr API key <input name="radarr_key" type="password"></label>
+    <label>Jellyfin URL <input name="jellyfin_url" placeholder="http://jellyfin:8096"></label>
+    <label>Jellyfin API key <input name="jellyfin_key" type="password"></label>
+    <label><input type="checkbox" name="pause_on_jellyfin_transcode"> Pause encoding while Jellyfin is transcoding</label>
+  </fieldset>
+  <p><button type="submit">Save settings</button> <span id="saved"></span></p>
+</form>
+</section>
+
+<section class="tab hidden" id="tab-logs">
+  <pre id="logs"></pre>
+</section>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
