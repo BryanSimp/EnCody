@@ -93,8 +93,9 @@ def probe(path):
 
 def resolution(p):
     w, h = p.get("width", 0), p.get("height", 0)
-    for minw, label in ((3800, "2160p"), (2500, "1440p"), (1900, "1080p"), (1260, "720p")):
-        if w >= minw:
+    for minw, minh, label in ((3800, 2100, "2160p"), (2500, 1400, "1440p"), (1900, 1060, "1080p"),
+                              (1260, 700, "720p")):
+        if w >= minw or h >= minh:
             return label
     return f"{h}p" if h else "?"
 

@@ -66,8 +66,9 @@
       <option value="hevc_qsv">hevc_qsv (Intel GPU)</option>
       <option value="h264_qsv">h264_qsv (Intel GPU)</option>
       <option value="libsvtav1">libsvtav1 (CPU, slow fallback)</option></select></label>
-    <label>Quality <input name="quality" type="number" min="1" max="63">
-      <small>Lower = better quality, bigger file. av1_qsv global_quality: try 24-28. hevc_qsv: 22-26. libsvtav1 CRF: 28-34.</small></label>
+    <label>Quality: movies (and anything not in tvshows/) <input name="quality" type="number" min="1" max="63"></label>
+    <label>Quality: TV shows (files under tvshows/) <input name="quality_tv" type="number" min="1" max="63">
+      <small>Lower = better quality, bigger file. av1_qsv global_quality: try 22-24 for movies, 26-28 for TV/animation. hevc_qsv: 22-26. libsvtav1 CRF: 28-34.</small></label>
     <label>Preset <input name="preset">
       <small>QSV: veryfast, faster, fast, medium, slow, slower, veryslow. SVT-AV1: 0-13 (names are mapped).</small></label>
     <label>Bit depth <select name="bit_depth"><option value="auto">Match source</option><option value="10">Always 10-bit</option><option value="8">8-bit (HDR is always 10-bit)</option></select></label>

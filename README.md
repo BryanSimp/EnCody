@@ -74,7 +74,8 @@ All settings are in the UI and stored in `/config/reencoder.db`.
 | Setting | Default | Notes |
 |---|---|---|
 | Video codec | `av1_qsv` | `hevc_qsv`, `h264_qsv` (Intel GPU) or `libsvtav1` (CPU, slow fallback). |
-| Quality | `26` | `global_quality` for QSV, CRF for `libsvtav1`. Lower = better and bigger. av1_qsv: try 24-28. |
+| Quality: movies | `26` | Used for everything not under `tvshows/`. `global_quality` for QSV, CRF for `libsvtav1`. Lower = better and bigger. av1_qsv: try 22-24 for movies. |
+| Quality: TV shows | `26` | Used for files under `<drive>/tvshows/`. av1_qsv: 26-28 is fine for TV and animation. The `START` log line shows the `q=` used. |
 | Preset | `slow` | QSV: `veryfast` … `veryslow`. SVT-AV1: `0`-`13` (QSV names are mapped). |
 | Bit depth | Match source | 10-bit sources stay 10-bit. HDR is always 10-bit. `h264_qsv` is always 8-bit. |
 | Also convert container to MKV | off | When on, every non-MKV file becomes `.mkv` (files already in the target codec are remuxed, no re-encode). |

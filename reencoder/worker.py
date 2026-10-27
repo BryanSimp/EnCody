@@ -328,7 +328,8 @@ class Worker:
         total = self.run_started + self.queue_totals()["files"]
         p = job.probe
         log.info(f"START ({self.run_started}/{total}) {paths.display(job.path)}  {p['codec']} "
-                 f"{media.resolution(p)} {hb(job.size)}" + ("  [remux only]" if job.remux else ""))
+                 f"{media.resolution(p)} {hb(job.size)}"
+                 + ("  [remux only]" if job.remux else f"  q={encoder.quality_for(job.path, s)}"))
         self.last_progress = time.time()
         threading.Thread(target=self._run_job, args=(job, dict(s)), name="encode", daemon=True).start()
 
