@@ -324,7 +324,8 @@ class Worker:
             e = j.encode
             if not e:
                 continue
-            nights = f" ({q['windows']} {q['windows_label']})" if q["windows"] else ""
+            unit = q["windows_label"] if q["windows"] != 1 else q["windows_label"][:-1]
+            nights = f" ({q['windows']} {unit})" if q["windows"] else ""
             paused = " | PAUSED (Jellyfin transcoding)" if self.jf_busy else ""
             if self.throttled(s):
                 paused += f" | THROTTLED {s['daytime_limit_pct']}%"
