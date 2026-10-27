@@ -48,6 +48,14 @@ def window_length(s):
     return (end - start).total_seconds()
 
 
+def days_needed(eta_sec, s):
+    """Days for `eta_sec` of full-speed encoding when the night window runs at full speed and the
+    rest of the day runs throttled (assumes every day is scheduled)."""
+    night = window_length(s)
+    per_day = night + (86400 - night) * s["daytime_limit_pct"] / 100.0
+    return math.ceil(eta_sec / per_day) if eta_sec > 0 else 0
+
+
 def windows_needed(eta_sec, now, s):
     """How many scheduled windows (including the current one) the remaining work needs."""
     if eta_sec <= 0:

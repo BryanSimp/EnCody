@@ -134,6 +134,21 @@ Days + start/end time, default every day 22:00 → 07:00 America/Chicago. A day 
 
 When the window ends: **finish the current file** (default) or **abort** it and delete the temp file.
 
+**Daytime mode** (off by default): keep encoding outside the window, throttled. Encody runs ffmpeg for part of
+every 20 s cycle and pauses it (SIGSTOP/SIGCONT) for the rest, so *Daytime speed limit 50 %* means ffmpeg runs
+10 s, pauses 10 s: about half the GPU encoder and half the speed on average. A GPU percentage can't be set
+directly; this is the closest reliable control. The window always runs at full speed, and so does *Run now*.
+*Stop* during the day stops until the next window. With daytime mode on, the queue ETA is shown in days
+(night at full speed + day at the limit). Combine it with *Pause while Jellyfin is transcoding* so daytime
+viewers always get the GPU.
+
+### System usage
+The status cards and every `PROGRESS` line show:
+- **CPU** and **RAM** of the whole server (read from `/proc`).
+- **GPU encoder**: how busy the Arc's video engine is *from Encody's own ffmpeg* (read from the Intel driver's
+  per-process counters, no extra privileges). Jellyfin's GPU use is not included; for the full picture run
+  `sudo intel_gpu_top` on the host. While throttled, the value swings between ~100 % and 0 %.
+
 Scans run on start, every N hours (default 6), after a settings change, and on *Scan now*.
 
 ### Dry run
@@ -206,7 +221,7 @@ last 500 lines in the UI:
 ```
 [2026-10-28 22:00:01] Window open. Queue: 412 files, 6.8TB to process.
 [2026-10-28 22:00:03] START (1/412) tvshows/Show/S01E01.mkv  h264 1080p 4.2GB
-[2026-10-28 22:04:10] PROGRESS 38% | 112 fps | 3.9x | file ETA 6m | QUEUE: 411 left, ETA ~41h 20m (5 nights)
+[2026-10-28 22:04:10] PROGRESS 38% | 112 fps | 3.9x | file ETA 6m | QUEUE: 411 left, ETA ~41h 20m (5 nights) | CPU 34% | GPU 91%
 [2026-10-28 22:11:30] DONE saved 1.9GB (45%) | verify OK | original deleted | total saved 1.9GB
 [2026-10-29 07:00:00] Window closed. This run: 38 done, 1 failed, 0 no savings, saved 61.2GB | ...
 ```

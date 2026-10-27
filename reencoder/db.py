@@ -37,6 +37,9 @@ class DB:
         with self.lock:
             self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.executescript(SCHEMA)
+            cols = {r[1] for r in self.conn.execute("PRAGMA table_info(history)")}
+            if "active_sec" not in cols:
+                self.conn.execute("ALTER TABLE history ADD COLUMN active_sec REAL")
 
     def q(self, sql, args=()):
         with self.lock:
@@ -133,7 +136,7 @@ class DB:
         return self.q("SELECT COALESCE(SUM(saved), 0) s FROM history WHERE result = 'done'")[0]["s"]
 
     def recent_speeds(self, n=10):
-        """(media seconds, wall seconds) of the last n successful encodes."""
-        return [(r["media_sec"], r["finished"] - r["started"]) for r in self.q(
-            "SELECT media_sec, started, finished FROM history WHERE result='done' AND media_sec > 0 "
+        """(media seconds, encoding seconds without pauses) of the last n successful encodes."""
+        return [(r["media_sec"], r["active_sec"] or r["finished"] - r["started"]) for r in self.q(
+            "SELECT media_sec, started, finished, active_sec FROM history WHERE result='done' AND media_sec > 0 "
             "ORDER BY id DESC LIMIT ?", (n,))]

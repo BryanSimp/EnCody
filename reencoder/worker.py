@@ -6,13 +6,19 @@ import threading
 import time
 from collections import Counter
 
-from . import encoder, integrations, media, paths, replace, scanner, schedule, verify
+from . import encoder, integrations, media, paths, replace, scanner, schedule, sysstats, verify
 from .log import human_bytes as hb, human_time as ht
 
 log = logging.getLogger("reencoder")
 
 PROGRESS_EVERY = 60
 JELLYFIN_EVERY = 30
+THROTTLE_CYCLE = 20  # seconds: at 50% ffmpeg runs 10 s, pauses 10 s
+
+
+def throttle_off(pct, t):
+    """True during the paused part of the run/pause cycle (first pct% of each cycle runs)."""
+    return t % THROTTLE_CYCLE >= THROTTLE_CYCLE * pct / 100.0
 
 
 class Job:
@@ -54,7 +60,8 @@ class Worker:
         self.lock = threading.Lock()
         self.manual = False            # "Run now" pressed: run regardless of schedule
         self.stopped_window = None     # window start the user pressed Stop in
-        self.window = None             # start of the window we are currently in
+        self.window = None             # id of the window we are in: night start time or "day:<date>"
+        self.mode = None               # "night" | "day" | None
         self.scan_requested = True
         self.scanning = False
         self.last_scan = 0.0
@@ -66,6 +73,7 @@ class Worker:
         self.idle_logged = False
         self.dry_logged = False
         self.no_space = set()
+        self.sysmon = sysstats.Sampler()
         self._stop = threading.Event()
 
     # ---- lifecycle -------------------------------------------------------
@@ -132,13 +140,19 @@ class Worker:
             threading.Thread(target=self._scan, args=(s,), name="scan", daemon=True).start()
 
         win = schedule.current_window(now, s)
-        win_id = win[0] if win else None
+        if win:
+            win_id, mode = win[0], "night"
+        elif s["daytime_enabled"] and s["schedule_enabled"]:
+            win_id, mode = f"day:{now.date()}", "day"
+        else:
+            win_id, mode = None, None
         if win_id != self.window:
             if self.window is not None and not self.manual:
-                self._end_run("Window closed.", s)
-            self.window = win_id
+                self._end_run("Daytime mode ended." if self.mode == "day" else "Window closed.", s)
+            self.window, self.mode = win_id, mode
             if win_id is not None and not self.manual:
-                self._begin_run("Window open.")
+                self._begin_run(f"Daytime mode on ({s['daytime_limit_pct']}% speed limit)." if mode == "day"
+                                else "Window open.")
 
         active = self.manual or (win_id is not None and win_id != self.stopped_window)
         with self.lock:
@@ -150,7 +164,12 @@ class Worker:
                     j.stop_reason = "window ended"
                     j.encode and j.encode.abort()
 
-        self._jellyfin_check(s, jobs)
+        self.sysmon.sample([j.encode.proc.pid for j in jobs if j.encode and j.encode.proc])
+        self._jellyfin_check(s)
+        off = self.throttled(s) and throttle_off(s["daytime_limit_pct"], time.time())
+        for j in jobs:
+            if j.encode:
+                j.encode.pause(self.jf_busy or off)
 
         if active and not self.scanning:
             if s["dry_run"]:
@@ -215,7 +234,7 @@ class Worker:
         with self.lock:
             for j in self.jobs.values():
                 if j.encode and j.encode.out_sec > 0:
-                    pairs.append((j.encode.out_sec, time.time() - j.encode.started))
+                    pairs.append((j.encode.out_sec, j.encode.active_seconds()))
         media_s = sum(p[0] for p in pairs)
         wall = sum(p[1] for p in pairs)
         return media_s / wall if wall > 0 else None
@@ -228,9 +247,14 @@ class Worker:
         speed = self.speed()
         par = max(1, min(s["concurrent_jobs"], q["files"] + len(jobs)))
         eta = left / (speed * par) if speed else None
-        windows = schedule.windows_needed(eta, now or dt.datetime.now(), s) if eta and s["schedule_enabled"] else None
+        windows, label = None, "nights"
+        if eta and s["schedule_enabled"]:
+            if s["daytime_enabled"]:
+                windows, label = schedule.days_needed(eta, s), "days"
+            else:
+                windows = schedule.windows_needed(eta, now or dt.datetime.now(), s)
         return {"files": q["files"] + len(jobs), "bytes": q["bytes"] + sum(j.size for j in jobs),
-                "eta": eta, "windows": windows, "speed": speed}
+                "eta": eta, "windows": windows, "windows_label": label, "speed": speed}
 
     def _next_job(self, s):
         for row in self.db.queue(s["sort"], limit=50):
@@ -300,17 +324,23 @@ class Worker:
             e = j.encode
             if not e:
                 continue
-            nights = f" ({q['windows']} night{'s' if q['windows'] != 1 else ''})" if q["windows"] else ""
-            paused = " | PAUSED (Jellyfin transcoding)" if e.paused else ""
+            nights = f" ({q['windows']} {q['windows_label']})" if q["windows"] else ""
+            paused = " | PAUSED (Jellyfin transcoding)" if self.jf_busy else ""
+            if self.throttled(s):
+                paused += f" | THROTTLED {s['daytime_limit_pct']}%"
+            st = self.sysmon.latest
+            usage = (f" | CPU {st['cpu']:.0f}%" if st["cpu"] is not None else "") + \
+                (f" | GPU {st['gpu']['video']:.0f}%" if "video" in st["gpu"] else "")
             log.info(f"PROGRESS {e.percent:.0f}% | {e.fps:.0f} fps | {e.speed:.1f}x | file ETA {ht(j.file_eta())} | "
-                     f"QUEUE: {q['files'] - 1} left, ETA ~{ht(q['eta'])}{nights}{paused}")
+                     f"QUEUE: {q['files'] - 1} left, ETA ~{ht(q['eta'])}{nights}{usage}{paused}")
 
-    def _jellyfin_check(self, s, jobs):
+    def throttled(self, s):
+        """Daytime run/pause throttle applies (Run now always runs at full speed)."""
+        return self.mode == "day" and not self.manual and s["daytime_limit_pct"] < 100
+
+    def _jellyfin_check(self, s):
         if not s["pause_on_jellyfin_transcode"]:
-            if self.jf_busy:
-                self.jf_busy = False
-                for j in jobs:
-                    j.encode and j.encode.pause(False)
+            self.jf_busy = False
             return
         if time.time() - self.last_jf < JELLYFIN_EVERY:
             return
@@ -319,8 +349,6 @@ class Worker:
         if busy != self.jf_busy:
             log.info("Jellyfin is transcoding: pausing encodes." if busy else "Jellyfin idle: resuming encodes.")
         self.jf_busy = busy
-        for j in jobs:
-            j.encode and j.encode.pause(busy)
 
     # ---- one job -------------------------------------------------------------
     def _start_job(self, row, s):
@@ -421,4 +449,5 @@ class Worker:
                             started=job.started, finished=time.time(), orig_size=job.size,
                             new_size=new_size, saved=saved,
                             media_sec=job.probe["duration"] if result == "done" and not job.remux else 0,
-                            result=result, message=message)
+                            result=result, message=message,
+                            active_sec=job.encode.active_seconds() if job.encode else None)
