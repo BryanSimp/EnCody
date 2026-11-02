@@ -32,6 +32,8 @@ log = logging.getLogger("reencoder")
 TR_FIELDS = ["hashString", "name", "status", "percentDone", "leftUntilDone", "sizeWhenDone",
              "doneDate", "addedDate"]
 TR_CHECKING = {1, 2}  # check pending, checking
+TR_STATUS = {0: "paused", 1: "waiting to verify", 2: "verifying", 3: "queued", 4: "downloading",
+             5: "queued to seed", 6: "seeding"}
 GRABBED = {"grabbed", "1"}
 IMPORTED = {"downloadfolderimported", "3"}
 KEPT_LABELS = {"seeding": "min seed time", "not_imported": "not fully imported yet",
@@ -77,7 +79,9 @@ class Transmission:
         raise RuntimeError("Transmission kept rejecting the session id")
 
     def torrents(self):
-        return self.call("torrent-get", {"fields": TR_FIELDS}).get("torrents", [])
+        # Newer Transmission versions may answer in snake_case (left_until_done): accept both.
+        return [{_camel(k): v for k, v in t.items()}
+                for t in self.call("torrent-get", {"fields": TR_FIELDS}).get("torrents", [])]
 
     def remove(self, hash_string):
         self.call("torrent-remove", {"ids": [hash_string], "delete-local-data": True})
@@ -119,6 +123,11 @@ class Arr:
                 return None
             f = m.get("movieFile") or {}
         return f.get("path")
+
+
+def _camel(key):
+    first, *rest = key.split("_")
+    return first + "".join(w[:1].upper() + w[1:] for w in rest)
 
 
 def make_arrs(s):
@@ -233,10 +242,13 @@ def run(s, db, tr=None, arrs=None, now=None, manual=False):
         torrents = tr.torrents()
     except Exception as e:
         raise RuntimeError(f"could not reach Transmission at {tr.url}: {e}")
-    rows, kept, removed, freed, downloading, first_error = [], Counter(), 0, 0, 0, ""
+    rows, busy, kept, removed, freed, first_error = [], [], Counter(), 0, 0, ""
     for t in sorted(torrents, key=lambda t: t.get("name", "").lower()):
         if t.get("leftUntilDone", 1) > 0 or t.get("percentDone", 0) < 1 or t.get("status") in TR_CHECKING:
-            downloading += 1
+            busy.append({"name": t.get("name", "?"), "size": t.get("sizeWhenDone") or 0, "finished": None,
+                         "action": "downloading",
+                         "reason": f"{100 * (t.get('percentDone') or 0):.0f}% downloaded, "
+                                   f"{TR_STATUS.get(t.get('status'), 'unknown state')} in Transmission"})
             continue
         ok, kind, reason, files = check(t, arrs, s, now)
         size = t.get("sizeWhenDone") or 0
@@ -268,6 +280,8 @@ def run(s, db, tr=None, arrs=None, now=None, manual=False):
                                message=f"removed from Transmission with its data | {reason}")
                 log.info(f"CLEANUP removed {t['name']} ({hb(size)}) from Transmission with its data | {reason}")
         rows.append(row)
+    downloading = len(busy)
+    rows += busy  # finished torrents first, then the ones still downloading
 
     why = ", ".join(f"{KEPT_LABELS.get(k, k)}: {n}" for k, n in kept.most_common())
     tail = (f" | kept {sum(kept.values())}" + (f" ({why})" if why else "")

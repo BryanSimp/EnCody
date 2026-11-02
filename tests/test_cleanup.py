@@ -146,8 +146,10 @@ def test_removes_only_fully_imported_torrents_on_the_drive(env, fake):
     assert rows["Show.S02.pack"]["action"] == "kept" and "1 of 2 episodes" in rows["Show.S02.pack"]["reason"]
     assert rows["Hand.Added"]["action"] == "kept"
     assert rows["Show.S03E01"]["action"] == "kept" and "not on the drive" in rows["Show.S03E01"]["reason"]
-    assert "Still.Downloading" not in rows
-    assert "still downloading" in report["summary"]
+    assert rows["Still.Downloading"]["action"] == "downloading"
+    assert rows["Still.Downloading"]["reason"] == "50% downloaded, downloading in Transmission"
+    assert report["rows"][-1]["name"] == "Still.Downloading"          # listed after the finished ones
+    assert "1 still downloading" in report["summary"]
     # library files untouched, removals recorded
     assert all(os.path.exists(p) for p in (ep1, ep2, movie))
     assert db.total_cleaned() == 2000
@@ -282,3 +284,16 @@ def test_path_map_validation():
     for bad in (["/tv /data/media"], ["tv => /data"], ["/tv => data"]):
         with pytest.raises(ValueError):
             validate("cleanup_path_map", bad)
+
+
+def test_snake_case_transmission(env, fake):
+    """A Transmission that answers in snake_case keys must still be understood."""
+    s, db, media = env
+    ep = put(media / "tvshows" / "Show" / "S01E01.mkv")
+    t = torrent("aa", "Show.S01E01")
+    fake.torrents = [{"hash_string": t["hashString"], "left_until_done": 0, "percent_done": 1,
+                      "size_when_done": 1000, "done_date": t["doneDate"], "added_date": t["addedDate"],
+                      "name": t["name"], "status": 6}]
+    fake.history["sonarr"] = [grab("aa", 1), imp("aa", 1, ep)]
+    cleanup.run(s, db, now=NOW)
+    assert fake.removed == ["aa"]

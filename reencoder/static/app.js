@@ -93,9 +93,9 @@ async function refreshTab() {
       txt += c.enabled ? (c.next_run ? ` Next run: ${when(c.next_run)}.` : "") : " Automatic cleanup is off.";
     }
     $("#cleanup-status").textContent = txt;
-    const cls = { "removed": "r-removed", "would remove": "r-would", "error": "r-error", "kept": "" };
+    const cls = { "removed": "r-removed", "would remove": "r-would", "error": "r-error", "kept": "", "downloading": "muted" };
     $("#downloads").innerHTML = r.rows.map((x) => `<tr><td>${esc(x.name)}</td><td>${bytes(x.size)}</td><td>${when(x.finished)}</td><td class="nowrap ${cls[x.action] || ""}">${esc(x.action)}</td><td>${esc(x.reason)}</td></tr>`).join("")
-      || `<tr><td colspan=5>${c.last_run ? "No finished torrents in Transmission." : "No report yet. Press Clean up now."}</td></tr>`;
+      || `<tr><td colspan=5>${c.last_run ? "Transmission has no torrents." : "No report yet. Press Clean up now."}</td></tr>`;
   } else if (tab === "logs") {
     const el = $("#logs");
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
