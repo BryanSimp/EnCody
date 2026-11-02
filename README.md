@@ -167,6 +167,37 @@ window opens or you press *Run now*). Nothing is encoded, renamed or deleted.
 - **Pause while Jellyfin transcodes:** checks Jellyfin `/Sessions` every 30 s. While someone is being video-transcoded,
   ffmpeg is paused (SIGSTOP) and no new file starts; it resumes when they stop.
 
+### Download cleanup (Transmission, off by default)
+Sonarr/Radarr download to the SSD, then *copy* the file to a media drive (a hardlink is impossible across drives) and
+leave the torrent seeding. This removes those leftovers. Every N hours (default 1) Encody asks Transmission for its
+torrents and removes a torrent **with its data** only when all of these hold:
+
+1. Transmission has all of it (nothing left to download, not verifying).
+2. It finished at least *Keep finished torrents N hours* ago (default 0).
+3. Sonarr or Radarr grabbed it, and their history has an import **from this download** for every episode/movie it was
+   grabbed for (the same rule they use for "fully imported"; a season pack with 9 of 10 episodes imported is kept).
+4. Every imported file exists, as a regular non-empty file (not a symlink), on one of the media drives
+   (`/data/media*`). If the imported path is gone, the episode's/movie's *current* file is accepted instead (Sonarr/Radarr
+   upgraded or moved it, or Encody renamed `.avi` → `.mkv`).
+
+Anything else is kept: hand-added torrents, partial imports, files not found on a drive, and everything when
+Sonarr/Radarr can't be reached. Transmission deletes the files itself (`torrent-remove` with delete-local-data), so
+Encody never deletes anything in the downloads folder and the SSD does not need to be mounted in Encody.
+
+Setup: fill in the Sonarr and Radarr URL + API key (above), then Settings → *Download cleanup*: Transmission URL (same
+host/port as in Sonarr → Settings → Download Clients, e.g. `http://transmission:9091`; Encody must share a Docker network
+with it) and the RPC username/password if you set one. *Cleanup dry run* is on by default: press *Clean up now* on the
+*Downloads* tab and read the *Why* column, then turn dry run off and tick *Clean up automatically*. Removed torrents
+show in *History* as `cleaned`; the *Downloads cleaned* card is the total freed.
+
+Path mappings are only needed if Sonarr/Radarr see the library at other paths than Encody, e.g. Sonarr's root folder is
+`/tv` while Encody has that drive at `/data/media/tvshows`: add `/tv => /data/media/tvshows`. The *Why* column says
+"add a path mapping" when this is the problem.
+
+Built-in alternative: Sonarr/Radarr → Settings → Download Clients → Transmission → *Remove Completed*. They only remove
+a torrent once Transmission has *stopped* it at a seed limit (Transmission → Preferences → Seeding: ratio or idle
+limit, or per indexer *Seed Ratio* / *Seed Time*). With no seed limit, torrents seed forever and are never removed.
+
 ---
 
 ## 3. Safety
@@ -253,6 +284,7 @@ The GPU: `/dev/dri` device + `group_add: ["993"]` (the host's `render` group, `g
 | `qsv-test.sh` fails, "Failed to initialise VAAPI" / "Permission denied" | `ls -ln /dev/dri` on the host; the render device group must match `group_add` (993). Check `docker exec encody id` shows 993. |
 | `vainfo` lists no `VAProfileAV1` | Host kernel too old for Arc (needs 6.2+), or `i915`/`xe` not loaded. `dmesg | grep -i -E "i915|xe"`. Jellyfin AV1 transcoding failing too points to the host. |
 | Encode works but slow (< 50 fps at 1080p) | Run `intel_gpu_top`: if *Video* is idle, it is falling back. Most decode is done on the CPU (more robust); 4K HEVC sources are CPU-bound on decode. |
+| Download cleanup keeps a torrent | *Downloads* tab, *Why* column. "add a path mapping": Sonarr/Radarr use other paths than `/data/media*`. "could not reach Transmission": wrong URL, or Encody is not on Transmission's Docker network (behind a VPN container, use that container's name). |
 | Files never get picked up | *Failed / skipped* tab shows the reason. Most common: hardlinked (still seeding), modified recently, below minimum size. |
 | Everything "no savings" | Quality number too low (= high quality). Raise it by 2-4. |
 | "only X free on the drive" | Free up space on that drive; the file is retried after the next scan. |
@@ -278,5 +310,5 @@ CONFIG_DIR=./config MEDIA_ROOT_GLOB="$PWD/testmedia*" UI_USER=a UI_PASS=b python
 ```
 
 Layout: `reencoder/` – `media.py` (ffprobe + skip rules), `scanner.py`, `encoder.py` (ffmpeg command + progress),
-`verify.py`, `replace.py` (safe swap, trash, crash cleanup), `schedule.py`, `worker.py` (the loop), `app.py` (API +
-auth), `static/` (the page).
+`verify.py`, `replace.py` (safe swap, trash, crash cleanup), `schedule.py`, `worker.py` (the loop), `cleanup.py`
+(Transmission download cleanup), `app.py` (API + auth), `static/` (the page).

@@ -32,11 +32,14 @@ th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line
 td { overflow-wrap: anywhere; }
 th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .r-done { color: var(--good); }
-.r-failed { color: var(--bad); }
+.r-failed, .r-error { color: var(--bad); }
+.r-cleaned, .r-removed { color: var(--good); }
+.r-would { color: var(--accent); }
+.nowrap { white-space: nowrap; }
 fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 10px 14px; background: var(--card); }
 legend { font-weight: 600; padding: 0 4px; }
 label { display: block; margin: 8px 0; }
 label.inline { display: inline-block; margin-right: 12px; }
-input:not([type=checkbox]), select { display: block; width: 100%; max-width: 360px; padding: 5px 8px; margin-top: 3px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); font: inherit; }
+input:not([type=checkbox]), select, textarea { display: block; width: 100%; max-width: 360px; padding: 5px 8px; margin-top: 3px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); font: inherit; }
 pre#logs { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px; height: 60vh; overflow: auto; white-space: pre-wrap; font-size: 12px; }
 code { font-size: 12px; }

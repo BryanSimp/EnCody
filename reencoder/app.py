@@ -98,6 +98,7 @@ def create_app(db=None, start_worker=True):
             "jellyfin_busy": worker.jf_busy,
             "throttled": worker.throttled(s),
             "system": worker.sysmon.latest,
+            "cleanup": worker.cleaner.status(s),
             "window": {"open": bool(win), "end": win[1].isoformat() if win else None,
                        "next": nxt[0].isoformat() if nxt else None,
                        "stopped": bool(win) and worker.stopped_window == win[0]},
@@ -196,6 +197,19 @@ def create_app(db=None, start_worker=True):
     @app.post("/api/stop")
     def stop():
         worker.stop()
+        return {"ok": True}
+
+    @app.get("/api/cleanup")
+    def cleanup_report():
+        r = worker.cleaner.report or {}
+        return {"status": worker.cleaner.status(db.settings()), "dry_run": r.get("dry_run"),
+                "rows": r.get("rows", [])}
+
+    @app.post("/api/cleanup")
+    def cleanup_now():
+        if not db.settings()["transmission_url"]:
+            raise HTTPException(400, "Set the Transmission URL first (Settings > Download cleanup)")
+        worker.cleaner.requested = True
         return {"ok": True}
 
     @app.get("/api/logs")
