@@ -45,6 +45,7 @@ async function refreshState() {
     ["GPU encoder", st.system.gpu.video == null ? (st.jobs.length ? "measuring" : "idle") : st.system.gpu.video.toFixed(0) + "%"],
     ["Space saved", bytes(st.total_saved)], ["Queue size", bytes(q.bytes)],
     ["Queue ETA", !q.files ? "nothing left" : q.eta ? dur(q.eta) + (q.windows ? ` (${q.windows} ${q.windows_label})` : "") : "after first file"],
+    ...(st.cleanup.configured || st.cleanup.freed_total ? [["Downloads cleaned", bytes(st.cleanup.freed_total)]] : []),
   ].map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join("");
 
   const w = st.window;
@@ -81,6 +82,20 @@ async function refreshTab() {
     $("#failed").innerHTML = f.map((r) => `<tr><td>${esc(r.display)}</td><td>${bytes(r.size)}</td><td>${r.failures}</td><td>${esc(r.reason)}</td><td>${retry(r.path)}</td></tr>`).join("");
     $("#nosave").innerHTML = n.map((r) => `<tr><td>${esc(r.display)}</td><td>${bytes(r.size)}</td><td>${esc(r.reason)}</td><td>${retry(r.path)}</td></tr>`).join("");
     $("#skipped").innerHTML = s.map((r) => `<tr><td>${esc(r.display)}</td><td>${bytes(r.size)}</td><td>${esc(r.reason)}</td></tr>`).join("");
+  } else if (tab === "downloads") {
+    const r = await api("/api/cleanup");
+    const c = r.status;
+    let txt = !c.configured ? "Not set up: add the Transmission URL under Settings > Download cleanup."
+      : c.running ? "Running..." : c.summary || "Not run yet.";
+    if (c.configured && !c.running) {
+      if (c.dry_run) txt = "DRY RUN is on for cleanup. " + txt;
+      txt = txt.replace(/\.?$/, ".");
+      txt += c.enabled ? (c.next_run ? ` Next run: ${when(c.next_run)}.` : "") : " Automatic cleanup is off.";
+    }
+    $("#cleanup-status").textContent = txt;
+    const cls = { "removed": "r-removed", "would remove": "r-would", "error": "r-error", "kept": "" };
+    $("#downloads").innerHTML = r.rows.map((x) => `<tr><td>${esc(x.name)}</td><td>${bytes(x.size)}</td><td>${when(x.finished)}</td><td class="nowrap ${cls[x.action] || ""}">${esc(x.action)}</td><td>${esc(x.reason)}</td></tr>`).join("")
+      || `<tr><td colspan=5>${c.last_run ? "No finished torrents in Transmission." : "No report yet. Press Clean up now."}</td></tr>`;
   } else if (tab === "logs") {
     const el = $("#logs");
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
@@ -118,6 +133,7 @@ function fillForm() {
     const v = settings[el.name];
     if (el.type === "checkbox") el.checked = !!v;
     else if (el.dataset.list !== undefined) el.value = v.join(", ");
+    else if (el.dataset.lines !== undefined) el.value = v.join("\n");
     else el.value = v;
   }
   $("#days").innerHTML = DAYS.map((d, i) => `<label class="inline"><input type="checkbox" data-day="${i}" ${settings.schedule_days.includes(i) ? "checked" : ""}> ${d}</label>`).join("");
@@ -130,6 +146,7 @@ async function saveForm(ev) {
     if (!el.name) continue;
     if (el.type === "checkbox") body[el.name] = el.checked;
     else if (el.dataset.list !== undefined) body[el.name] = el.value.split(",").map((x) => x.trim()).filter(Boolean);
+    else if (el.dataset.lines !== undefined) body[el.name] = el.value.split("\n").map((x) => x.trim()).filter(Boolean);
     else body[el.name] = el.value;
   }
   body.schedule_days = [...document.querySelectorAll("[data-day]:checked")].map((x) => Number(x.dataset.day));
@@ -159,6 +176,14 @@ document.addEventListener("click", async (ev) => {
   } else if (t.dataset.retry) {
     await api("/api/retry", { method: "POST", body: JSON.stringify({ path: t.dataset.retry }) });
     refreshTab();
+  } else if (t.id === "cleanup-now") {
+    try {
+      await api("/api/cleanup", { method: "POST" });
+      $("#cleanup-status").textContent = "Running...";
+      setTimeout(refreshTab, 1500);
+    } catch (e) {
+      $("#cleanup-status").textContent = "Error: " + e.message;
+    }
   } else if (t.id === "retry-all") {
     await api("/api/retry", { method: "POST", body: "{}" });
     refreshTab();

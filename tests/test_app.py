@@ -22,7 +22,8 @@ BAD = {"Authorization": "Basic " + base64.b64encode(b"admin:wrong").decode()}
 
 ROUTES = [("get", "/"), ("get", "/api/state"), ("put", "/api/settings"), ("get", "/api/browse"),
           ("get", "/api/files"), ("get", "/api/history"), ("post", "/api/retry"), ("post", "/api/scan"),
-          ("post", "/api/run"), ("post", "/api/stop"), ("get", "/api/logs"), ("get", "/static/app.js"),
+          ("post", "/api/run"), ("post", "/api/stop"), ("get", "/api/logs"),
+          ("get", "/api/cleanup"), ("post", "/api/cleanup"), ("get", "/static/app.js"),
           ("get", "/nope"), ("get", "/docs")]
 
 
@@ -69,3 +70,18 @@ def test_refuses_to_start_without_auth(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "UI_PASS", "")
     with pytest.raises(SystemExit):
         app_mod.create_app(db=DB(str(tmp_path / "t.db")), start_worker=False)
+
+
+def test_cleanup_api(client):
+    r = client.get("/api/state", headers=AUTH).json()["cleanup"]
+    assert r["configured"] is False and r["freed_total"] == 0
+    assert client.post("/api/cleanup", headers=AUTH).status_code == 400   # no Transmission URL yet
+    put = client.put("/api/settings", json={"transmission_url": "http://t:9091", "transmission_pass": "pw",
+                                             "cleanup_path_map": ["/tv => /data/media/tvshows"]}, headers=AUTH)
+    assert put.status_code == 200 and put.json()["transmission_pass"] == "********"
+    assert client.post("/api/cleanup", headers=AUTH).json() == {"ok": True}
+    assert client.app.state.worker.cleaner.requested
+    r = client.get("/api/cleanup", headers=AUTH).json()
+    assert r["rows"] == [] and r["status"]["configured"] and r["status"]["running"]
+    bad = client.put("/api/settings", json={"cleanup_path_map": ["nonsense"]}, headers=AUTH)
+    assert bad.status_code == 400

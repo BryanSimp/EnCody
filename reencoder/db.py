@@ -135,6 +135,10 @@ class DB:
     def total_saved(self):
         return self.q("SELECT COALESCE(SUM(saved), 0) s FROM history WHERE result = 'done'")[0]["s"]
 
+    def total_cleaned(self):
+        """Bytes freed by the download cleanup (torrents removed from Transmission)."""
+        return self.q("SELECT COALESCE(SUM(saved), 0) s FROM history WHERE result = 'cleaned'")[0]["s"]
+
     def recent_speeds(self, n=10):
         """(media seconds, encoding seconds without pauses) of the last n successful encodes."""
         return [(r["media_sec"], r["active_sec"] or r["finished"] - r["started"]) for r in self.q(

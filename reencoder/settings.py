@@ -59,6 +59,14 @@ DEFAULTS = {
     "radarr_url": "", "radarr_key": "",
     "jellyfin_url": "", "jellyfin_key": "",
     "pause_on_jellyfin_transcode": False,
+    # Download cleanup (off by default): remove finished torrents from Transmission, with their
+    # data, once Sonarr/Radarr imported them and the imported file is on a media drive.
+    "cleanup_enabled": False,
+    "cleanup_dry_run": True,
+    "cleanup_interval_hours": 1,
+    "cleanup_min_seed_hours": 0,
+    "cleanup_path_map": [],   # "Sonarr/Radarr path => Encody path", only if they differ
+    "transmission_url": "", "transmission_user": "", "transmission_pass": "",
 }
 
 ENUMS = {
@@ -83,8 +91,10 @@ RANGES = {
     "trash_days": (0, 3650),
     "concurrent_jobs": (1, 4),
     "daytime_limit_pct": (10, 100),
+    "cleanup_interval_hours": (1, 168),
+    "cleanup_min_seed_hours": (0, 8760),
 }
-SECRET_KEYS = {"sonarr_key", "radarr_key", "jellyfin_key"}
+SECRET_KEYS = {"sonarr_key", "radarr_key", "jellyfin_key", "transmission_pass"}
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -109,6 +119,8 @@ def validate(key, value):
             raise ValueError(f"{key} must be a list")
         if key == "schedule_days":
             value = sorted({int(d) for d in value if 0 <= int(d) <= 6})
+        elif key == "cleanup_path_map":
+            value = [_path_map(str(v)) for v in value if str(v).strip()]
         else:
             value = [str(v).strip() for v in value if str(v).strip()]
     else:
@@ -122,3 +134,10 @@ def validate(key, value):
     if key == "render_device" and not value.startswith("/dev/dri/"):
         raise ValueError("render_device must be under /dev/dri/")
     return value
+
+
+def _path_map(line):
+    remote, sep, local = (x.strip() for x in line.partition("=>"))
+    if not sep or not remote.startswith("/") or not local.startswith("/"):
+        raise ValueError(f"path mapping must look like '/tv => /data/media/tvshows', got: {line.strip()}")
+    return f"{remote} => {local}"

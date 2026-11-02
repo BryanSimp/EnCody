@@ -26,6 +26,7 @@
   <button data-tab="queue" class="active">Queue</button>
   <button data-tab="history">History</button>
   <button data-tab="failed">Failed / skipped</button>
+  <button data-tab="downloads">Downloads</button>
   <button data-tab="folders">Folders</button>
   <button data-tab="settings">Settings</button>
   <button data-tab="logs">Logs</button>
@@ -48,6 +49,12 @@
   <table><thead><tr><th>File</th><th>Size</th><th>Reason</th><th></th></tr></thead><tbody id="nosave"></tbody></table>
   <h3>Skipped</h3>
   <table><thead><tr><th>File</th><th>Size</th><th>Reason</th></tr></thead><tbody id="skipped"></tbody></table>
+</section>
+
+<section class="tab hidden" id="tab-downloads">
+  <p class="hint">Download cleanup: finished torrents are removed from Transmission, with their data, once Sonarr/Radarr imported every episode/movie and the imported file is on one of the media drives. Set it up under Settings &gt; Download cleanup.</p>
+  <p><button id="cleanup-now">Clean up now</button> <span id="cleanup-status"></span></p>
+  <table><thead><tr><th>Torrent</th><th>Size</th><th>Finished</th><th>Result</th><th>Why</th></tr></thead><tbody id="downloads"></tbody></table>
 </section>
 
 <section class="tab hidden" id="tab-folders">
@@ -127,6 +134,22 @@
     <label>Jellyfin URL <input name="jellyfin_url" placeholder="http://jellyfin:8096"></label>
     <label>Jellyfin API key <input name="jellyfin_key" type="password"></label>
     <label><input type="checkbox" name="pause_on_jellyfin_transcode"> Pause encoding while Jellyfin is transcoding</label>
+  </fieldset>
+
+  <fieldset><legend>Download cleanup (Transmission)</legend>
+    <p class="hint">Removes finished torrents from Transmission <b>with their data</b> once Sonarr/Radarr imported every episode/movie of it and the imported file is on a media drive. Uses the Sonarr/Radarr URL + API key above. Transmission deletes the files itself, so the downloads folder does not need to be mounted in Encody. Results: Downloads tab.</p>
+    <label><input type="checkbox" name="cleanup_enabled"> Clean up automatically</label>
+    <label><input type="checkbox" name="cleanup_dry_run"> Cleanup dry run (only list what would be removed)</label>
+    <label>Transmission URL <input name="transmission_url" placeholder="http://transmission:9091">
+      <small>Same host and port as in Sonarr &gt; Settings &gt; Download Clients &gt; Transmission.</small></label>
+    <label>Transmission username <input name="transmission_user" autocomplete="off"></label>
+    <label>Transmission password <input name="transmission_pass" type="password" autocomplete="new-password"></label>
+    <label>Check every N hours <input name="cleanup_interval_hours" type="number" min="1" max="168"></label>
+    <label>Keep finished torrents at least N hours <input name="cleanup_min_seed_hours" type="number" min="0">
+      <small>Time since the download finished. Raise it if a tracker wants you to seed for a while.</small></label>
+    <label>Path mappings (only if Sonarr/Radarr see the library at other paths than <code>/data/media*</code>)
+      <textarea name="cleanup_path_map" data-lines rows="3" placeholder="/tv => /data/media/tvshows"></textarea>
+      <small>One per line: Sonarr/Radarr path =&gt; Encody path.</small></label>
   </fieldset>
   <p><button type="submit">Save settings</button> <span id="saved"></span></p>
 </form>

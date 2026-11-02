@@ -6,7 +6,7 @@ import threading
 import time
 from collections import Counter
 
-from . import encoder, integrations, media, paths, replace, scanner, schedule, sysstats, verify
+from . import cleanup, encoder, integrations, media, paths, replace, scanner, schedule, sysstats, verify
 from .log import human_bytes as hb, human_time as ht
 
 log = logging.getLogger("reencoder")
@@ -74,6 +74,7 @@ class Worker:
         self.dry_logged = False
         self.no_space = set()
         self.sysmon = sysstats.Sampler()
+        self.cleaner = cleanup.Cleaner(db)
         self._stop = threading.Event()
 
     # ---- lifecycle -------------------------------------------------------
@@ -138,6 +139,7 @@ class Worker:
             self.scan_requested = False
             self.scanning = True
             threading.Thread(target=self._scan, args=(s,), name="scan", daemon=True).start()
+        self.cleaner.maybe_start(s)
 
         win = schedule.current_window(now, s)
         if win:
