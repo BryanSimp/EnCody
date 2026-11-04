@@ -32,9 +32,11 @@ class Job:
         self.encode = None
         self.started = time.time()
         self.stop_reason = ""
+        self.stalled = False       # set by the watchdog before it kills ffmpeg
+        self.decoder = None        # QSV decoder in use, None = CPU decode
 
     def remaining_media(self):
-        done = self.encode.out_sec if self.encode else 0
+        done = self.encode.media_sec if self.encode else 0
         return max(0.0, self.probe["duration"] - done)
 
     def file_eta(self):
@@ -50,6 +52,7 @@ class Job:
                 "percent": round(e.percent, 1) if e else 0, "fps": e.fps if e else 0,
                 "speed": e.speed if e else 0, "eta": self.file_eta(),
                 "paused": bool(e and e.paused), "remux": self.remux,
+                "decode": "" if self.remux else (self.decoder or "cpu"),
                 "phase": "encoding" if e and e.proc and e.proc.poll() is None else "verifying"}
 
 
@@ -167,6 +170,7 @@ class Worker:
                     j.encode and j.encode.abort()
 
         self.sysmon.sample([j.encode.proc.pid for j in jobs if j.encode and j.encode.proc])
+        self._watchdog(s, jobs)
         self._jellyfin_check(s)
         off = self.throttled(s) and throttle_off(s["daytime_limit_pct"], time.time())
         for j in jobs:
@@ -207,7 +211,9 @@ class Worker:
             log.info(f"SCAN started: {len(s['folders'])} folder(s)")
             n = integrations.refresh_animation(s)
             if n is not None:
-                log.info(f"Jellyfin: {n} animated series/movies found (quality {s['quality_animation']})")
+                log.info(f"Jellyfin: {n['series']} animated series ({n['episodes']} episodes) and "
+                         f"{n['movies']} animated movies found (quality {s['quality_animation']})"
+                         + (f"; {n['outside']} of them are outside Encody's media folders" if n["outside"] else ""))
             r = scanner.scan(self.db, s, running=self.jobs)
             c = r["counts"]
             q = self.queue_totals()
@@ -235,8 +241,8 @@ class Worker:
         pairs = self.db.recent_speeds(10)
         with self.lock:
             for j in self.jobs.values():
-                if j.encode and j.encode.out_sec > 0:
-                    pairs.append((j.encode.out_sec, j.encode.active_seconds()))
+                if j.encode and j.encode.media_sec > 0:
+                    pairs.append((j.encode.media_sec, j.encode.active_seconds()))
         media_s = sum(p[0] for p in pairs)
         wall = sum(p[1] for p in pairs)
         return media_s / wall if wall > 0 else None
@@ -300,7 +306,7 @@ class Worker:
     def _end_run(self, msg, s):
         st = self.stats
         q = self.queue_eta(s)
-        log.info(f"{msg} This run: {st['done']} done, {st['failed']} failed, {st['no_savings']} no savings, "
+        log.info(f"{msg} This run: {st['done']} done, {st['failed']} failed, {st['no_savings']} not smaller, "
                  f"saved {hb(st['saved'])} | total saved {hb(self.db.total_saved())} | "
                  f"queue: {q['files']} left, ETA ~{ht(q['eta'])}")
         if st["done"] and s["refresh_after_replace"]:
@@ -353,9 +359,25 @@ class Worker:
             log.info("Jellyfin is transcoding: pausing encodes." if busy else "Jellyfin idle: resuming encodes.")
         self.jf_busy = busy
 
+    def _watchdog(self, s, jobs):
+        """Kill an ffmpeg whose output time and frame count both stood still for stall_minutes
+        (paused time does not count). The job is then marked failed in _encode_and_replace."""
+        limit = s["stall_minutes"] * 60
+        if not limit:
+            return
+        for j in jobs:
+            e = j.encode
+            if not e or j.stalled or j.stop_reason or not e.running() or e.stalled_for() < limit:
+                continue
+            j.stalled = True
+            log.warning(f"STALLED {paths.display(j.path)}: no progress for {s['stall_minutes']} min "
+                        f"(at {e.percent:.0f}%, frame {e.frames}); killing ffmpeg")
+            e.abort()
+
     # ---- one job -------------------------------------------------------------
     def _start_job(self, row, s):
         job = Job(row, s)
+        job.decoder = None if job.remux else encoder.hw_decoder(job.probe, s)
         with self.lock:
             self.jobs[job.path] = job
         self.db.set_status(job.path, "running")
@@ -365,7 +387,8 @@ class Worker:
         log.info(f"START ({self.run_started}/{total}) {paths.display(job.path)}  {p['codec']} "
                  f"{media.resolution(p)} {hb(job.size)}"
                  + ("  [remux only]" if job.remux else
-                    f"  q={encoder.quality_for(job.path, s)} ({encoder.tier(job.path)})"))
+                    f"  q={encoder.quality_for(job.path, s)} ({encoder.tier(job.path)})"
+                    f"  decode={job.decoder or 'cpu'}"))
         self.last_progress = time.time()
         threading.Thread(target=self._run_job, args=(job, dict(s)), name="encode", daemon=True).start()
 
@@ -381,15 +404,41 @@ class Worker:
                 self.jobs.pop(job.path, None)
             self.idle_logged = False
 
-    def _encode_and_replace(self, job, s):
-        cmd = encoder.build_cmd(job.path, job.tmp, job.probe, s, remux=job.remux)
+    def _ffmpeg(self, job, s, hw_decode):
+        """Run ffmpeg once. Returns (exit code, Encode)."""
+        cmd = encoder.build_cmd(job.path, job.tmp, job.probe, s, remux=job.remux, hw_decode=hw_decode)
         log.debug("ffmpeg: " + " ".join(cmd))
-        job.encode = enc = encoder.Encode(cmd, job.probe["duration"])
+        enc = encoder.Encode(cmd, job.probe["duration"], job.probe.get("fps"))
+        job.encode = enc
+        if job.stop_reason:  # Stop pressed between two attempts
+            enc.aborted = True
         try:
             code = enc.run()
         except OSError as e:
             code = -1
             enc.stderr.append(str(e))
+        return code, enc
+
+    def _encode_and_replace(self, job, s):
+        if not job.probe.get("fps"):  # rows scanned before fps was stored: needed for frame-based progress
+            try:
+                job.probe["fps"] = media.probe(job.path).get("fps", 0.0)
+            except media.ProbeError:
+                pass
+        code, enc = self._ffmpeg(job, s, hw_decode=bool(job.decoder))
+        if code != 0 and job.decoder and not (job.stop_reason or enc.aborted or job.stalled):
+            tail = " | ".join(list(enc.stderr)[-3:]) or f"exit code {code}"
+            log.warning(f"HW DECODE failed ({job.decoder}) for {paths.display(job.path)}: {tail}; "
+                        "retrying with CPU decode")
+            replace.remove_temp(job.tmp)
+            job.decoder = None
+            code, enc = self._ffmpeg(job, s, hw_decode=False)
+        if job.stalled:
+            replace.remove_temp(job.tmp)
+            tail = " | ".join(list(enc.stderr)[-5:]) or "ffmpeg printed no error"
+            self._failed(job, s, f"stalled: no progress for {s['stall_minutes']} min at {enc.percent:.0f}% "
+                                 f"(frame {enc.frames}); ffmpeg: {tail}", final=True)
+            return
         if job.stop_reason or enc.aborted:
             replace.remove_temp(job.tmp)
             self.db.set_status(job.path, "todo", "")
@@ -414,10 +463,12 @@ class Worker:
                 log.warning("ffmpeg said: " + " | ".join(list(enc.stderr)[-5:]))
             replace.remove_temp(job.tmp)
             if res.no_savings:
+                # Shown as skipped; stays skipped while the file is unchanged (Retry puts it back).
                 self.db.set_status(job.path, "no_savings", res.reason)
                 self._history(job, "no_savings", res.reason, new_size=out_size)
                 self.stats["no_savings"] += 1
-                log.info(f"NO SAVINGS {paths.display(job.path)}: {res.reason}; original kept, will not retry")
+                log.info(f"SKIP {paths.display(job.path)}: {res.reason}; encode discarded, original kept, "
+                         "will not retry")
             else:
                 self._failed(job, s, res.reason)
             return
@@ -437,10 +488,11 @@ class Worker:
         pct = 100.0 * saved / job.size if job.size else 0
         log.info(f"DONE saved {hb(saved)} ({pct:.0f}%) | verify OK | {note} | total saved {hb(self.db.total_saved())}")
 
-    def _failed(self, job, s, reason):
+    def _failed(self, job, s, reason, final=False):
+        """final=True: failed right away (no automatic retry), e.g. after a stall."""
         row = self.db.file(job.path)
         failures = (row["failures"] if row else 0) + 1
-        status = "failed" if failures >= s["max_failures"] else "todo"
+        status = "failed" if final or failures >= s["max_failures"] else "todo"
         self.db.set_status(job.path, status, reason[:300], failures=failures)
         self._history(job, "failed", reason[:300])
         self.stats["failed"] += 1

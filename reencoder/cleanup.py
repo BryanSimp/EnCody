@@ -25,6 +25,7 @@ import urllib.request
 from collections import Counter
 
 from . import paths
+from .integrations import CallError, call_error
 from .log import human_bytes as hb, human_time as ht
 
 log = logging.getLogger("reencoder")
@@ -70,7 +71,9 @@ class Transmission:
                 if e.code == 409 and e.headers.get("X-Transmission-Session-Id"):
                     self.session = e.headers["X-Transmission-Session-Id"]
                     continue
-                raise
+                raise call_error("POST", self.url, e) from None
+            except (urllib.error.URLError, OSError) as e:
+                raise call_error("POST", self.url, e) from None
             if out.get("result") != "success":
                 raise RuntimeError(f"Transmission {method}: {out.get('result')}")
             return out.get("arguments") or {}
@@ -93,10 +96,14 @@ class Arr:
 
     def get(self, path, **params):
         q = "?" + urllib.parse.urlencode(params) if params else ""
-        req = urllib.request.Request(self.url + path + q, headers={"X-Api-Key": self.key})
-        with urllib.request.urlopen(req, timeout=self.timeout) as r:
-            raw = r.read()
-            return json.loads(raw) if raw else None
+        url = self.url + path + q
+        req = urllib.request.Request(url, headers={"X-Api-Key": self.key})
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                raw = r.read()
+        except (urllib.error.URLError, OSError) as e:
+            raise call_error("GET", url, e) from None
+        return json.loads(raw) if raw else None
 
     def history(self, download_id):
         """History records of one download. Filtered here as well, in case the server ignores the filter."""
@@ -232,7 +239,8 @@ def run(s, db, tr=None, arrs=None, now=None, manual=False):
     try:
         torrents = tr.torrents()
     except Exception as e:
-        raise RuntimeError(f"could not reach Transmission at {tr.url}: {e}")
+        where = "" if isinstance(e, CallError) else f" at {tr.url}"  # CallError already names the URL
+        raise RuntimeError(f"could not reach Transmission{where}: {e}")
     rows, kept, removed, freed, downloading, first_error = [], Counter(), 0, 0, 0, ""
     for t in sorted(torrents, key=lambda t: t.get("name", "").lower()):
         if t.get("leftUntilDone", 1) > 0 or t.get("percentDone", 0) < 1 or t.get("status") in TR_CHECKING:

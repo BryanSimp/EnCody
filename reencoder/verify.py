@@ -40,8 +40,8 @@ def check(orig, out, orig_size, out_size, s, exit_code, remux=False):
         need = orig_size * (1 - s["min_savings_pct"] / 100.0)
         if out_size >= orig_size or out_size > need:
             pct = 100.0 * (orig_size - out_size) / orig_size if orig_size else 0
-            return Result(False, f"no savings: output {pct:.1f}% smaller, need {s['min_savings_pct']}%",
-                          no_savings=True)
+            got = f"output is {-pct:.1f}% bigger" if pct < 0 else f"output only {pct:.1f}% smaller"
+            return Result(False, f"not smaller: {got}, need {s['min_savings_pct']}%", no_savings=True)
     return Result(True)
 
 

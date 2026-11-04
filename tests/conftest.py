@@ -52,3 +52,23 @@ def make_clip(path, seconds=6, size="640x360"):
         "-c:a", "aac", "-c:s", "mov_text" if str(path).endswith(".mp4") else "srt", str(path)], check=True)
     os.remove(srt)
     return path
+
+
+@pytest.fixture
+def logs():
+    """Messages logged to the 'reencoder' logger during the test (works even with propagate off)."""
+    import logging
+
+    lines = []
+
+    class H(logging.Handler):
+        def emit(self, record):
+            lines.append((record.levelname, record.getMessage()))
+
+    lg = logging.getLogger("reencoder")
+    h, old = H(), lg.level
+    lg.addHandler(h)
+    lg.setLevel(logging.DEBUG)
+    yield lines
+    lg.removeHandler(h)
+    lg.setLevel(old)

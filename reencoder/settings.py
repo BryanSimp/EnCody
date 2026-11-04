@@ -24,6 +24,8 @@ DEFAULTS = {
     "bit_depth": "auto",      # auto (match source) | 10 | 8
     "convert_to_mkv": False,  # also remux non-MKV files even if already the target codec
     "render_device": "/dev/dri/renderD128",
+    "hw_decode": True,        # QSV: decode on the GPU too (falls back to CPU decode if that fails)
+    "stall_minutes": 10,      # kill a job whose ffmpeg makes no progress for N minutes (0 = off)
     # Scanner / skip rules
     "skip_codecs": ["hevc", "av1"],  # already-efficient source codecs (target codec is always skipped)
     "skip_recent_minutes": 30,
@@ -36,7 +38,7 @@ DEFAULTS = {
     # Verify
     "duration_tol_sec": 1.0,
     "duration_tol_pct": 0.5,
-    "min_savings_pct": 5,
+    "min_savings_pct": 10,    # output must be at least N% smaller, else it is discarded ("not smaller")
     "decode_test": True,
     "decode_head_sec": 180,
     "decode_tail_sec": 60,
@@ -82,6 +84,7 @@ RANGES = {
     "skip_recent_minutes": (0, 100000),
     "min_size_mb": (0, 1000000),
     "max_failures": (1, 100),
+    "stall_minutes": (0, 1440),
     "scan_interval_hours": (0, 720),
     "duration_tol_sec": (0, 600),
     "duration_tol_pct": (0, 50),

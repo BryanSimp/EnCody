@@ -82,6 +82,8 @@ All settings are in the UI and stored in `/config/reencoder.db`.
 | Bit depth | Match source | 10-bit sources stay 10-bit. HDR is always 10-bit. `h264_qsv` is always 8-bit. |
 | Also convert container to MKV | off | When on, every non-MKV file becomes `.mkv` (files already in the target codec are remuxed, no re-encode). |
 | GPU render device | `/dev/dri/renderD128` | Change if you have more than one GPU. |
+| Decode on the GPU too | on | QSV codecs only. Adds `-hwaccel qsv -hwaccel_output_format qsv -c:v <codec>_qsv`, so frames stay on the GPU from decoder to encoder (CPU stays low). GPU-decoded: H.264 8-bit, HEVC 8/10-bit, AV1, VP9, MPEG-2, VC-1. Always CPU-decoded: Xvid/DivX, WMV, VP8, 10-bit H.264, 4:2:2/4:4:4. If ffmpeg fails with GPU decode, that file is retried right away with CPU decode (`HW DECODE failed ... retrying with CPU decode`). `START` lines and the dashboard show `decode=hevc_qsv` or `cpu`. |
+| Stuck job watchdog | `10` min | Kills ffmpeg when neither the output time nor the video frame count moved for N minutes (paused time not counted), marks the file failed with the ffmpeg error tail, and moves on. `0` = off. |
 | Concurrent jobs | `1` | One at a time is best for a single A310. |
 
 Audio, subtitles, attachments and chapters are always copied (`-map 0 -c copy`); only the main video stream is
@@ -103,7 +105,7 @@ will see a new path)`.
 | Dolby Vision | **always skipped**: the DV layer cannot be carried over, and the rule is "never silently strip HDR". |
 | Smaller than N MB | 200 |
 | Failed N times | 2. Press *Retry* on the *Failed / skipped* tab. |
-| No savings | never retried automatically (Retry button available). |
+| Not smaller (output not at least N % smaller, see Verify) | counted as skipped, original kept, never retried automatically while the file is unchanged (Retry button available). |
 
 Rescans are fast: each file is remembered by path + size + mtime. Only new or changed files are probed again.
 
@@ -111,7 +113,7 @@ Rescans are fast: each file is remembered by path + size + mtime. Only new or ch
 | Setting | Default |
 |---|---|
 | Duration tolerance | 1 s or 0.5 %, whichever is larger |
-| Require at least N % savings | 5 % |
+| Require at least N % savings | 10 %. Otherwise the encode is discarded, the original kept and the file skipped with reason `not smaller: ...`. Many HEVC sources around 2 Mbps end up here. |
 | Quick decode test | on: first 180 s and last 60 s are decoded |
 | Delete original after successful verify | on |
 | Keep originals N days in `.reencoder-trash` | 0 (delete immediately) |
@@ -159,13 +161,25 @@ window opens or you press *Run now*). Nothing is encoded, renamed or deleted.
 - **Refresh after replace:** after a run that replaced files, sends `RescanSeries` to Sonarr, `RescanMovie` to
   Radarr and `Library/Refresh` to Jellyfin (only for the ones with URL + API key filled in). Use container names
   on the `proxy` network, e.g. `http://sonarr:8989`.
-- **Detect animation:** on every scan Encody asks Jellyfin (`/Items`, one call) which series and movies have the
-  genre `Animation` or `Anime`, and uses the animation quality for them. Jellyfin uses the same `/data/media*`
-  paths, so no path mapping is needed. If Jellyfin is down, the previous list is kept. Check the result in the
-  Queue tab (Quality column) or the `q=.. (animation|tv|movie)` part of `START` and `DRY RUN` log lines.
+- **Jellyfin auth:** every Jellyfin call sends `Authorization: MediaBrowser Token="<API key>"`. Newer Jellyfin
+  servers answer 401 to the old `X-Emby-Token` header and `?api_key=` query parameter, so those are not used.
+  Create the key in Jellyfin: Dashboard → API Keys. Test from the container:
+  `docker exec encody curl -s -o /dev/null -w "%{http_code}" -H 'Authorization: MediaBrowser Token="KEY"' "http://jellyfin:8096/Items?Limit=1&Recursive=true"` (expect `200`).
+- **Detect animation:** on every scan Encody asks Jellyfin (`/Items`, one call for movies, series and episodes)
+  which titles have the genre `Animation` or `Anime` (any case), and uses the animation quality for them. Genres
+  live on the series: an episode is animated when its series is (matched by `SeriesId`, and by the series folder),
+  so seasons on another drive are covered too. Paths are compared as normalized absolute paths
+  (`/data/media3/movies/...`), never the short `movies/...` form shown in the UI; Jellyfin must see the media at
+  the same `/data/media*` paths (the log warns if none of Jellyfin's animated titles are under them). If Jellyfin is
+  down or rejects the key, the previous list is kept and one warning per scan names the HTTP status and URL. Check
+  the result in the `Jellyfin: N animated series (N episodes) and N animated movies found` log line, the Queue tab
+  (Quality column) or the `q=.. (animation|tv|movie)` part of `START` and `DRY RUN` lines.
   Wrong genre on a title? Fix it in Jellyfin (Edit metadata → Genres), then *Scan now*.
 - **Pause while Jellyfin transcodes:** checks Jellyfin `/Sessions` every 30 s. While someone is being video-transcoded,
   ffmpeg is paused (SIGSTOP) and no new file starts; it resumes when they stop.
+- **Errors:** a failed Sonarr/Radarr/Jellyfin/Transmission call is logged with method, URL and HTTP status, e.g.
+  `GET http://jellyfin:8096/Items?... -> HTTP 401 Unauthorized (check the API key)`. API keys are sent in headers
+  and never logged.
 
 ### Download cleanup (Transmission, off by default)
 Sonarr/Radarr download to the SSD, then *copy* the file to a media drive (a hardlink is impossible across drives) and
@@ -210,7 +224,8 @@ The pipeline for every file:
    ignore it; the same folder means the final rename is atomic.
 3. Verify, all must pass: ffmpeg exit code 0; ffprobe reads the output and it is not empty; duration within
    tolerance; at least 1 video stream; audio and subtitle stream counts equal the original; output at least N %
-   smaller; decode test (if on). Any failure → temp deleted, original untouched.
+   smaller (else: skipped as `not smaller`, never retried); decode test (if on). Any failure → temp deleted,
+   original untouched.
 4. Only then: atomic `rename()` of the temp file over the final name, then the original is deleted / trashed.
    **The original is never removed before the verified replacement exists.**
 5. Result and bytes saved go to the history table.
@@ -254,12 +269,18 @@ last 500 lines in the UI:
 [2026-10-28 22:00:03] START (1/412) tvshows/Show/S01E01.mkv  h264 1080p 4.2GB
 [2026-10-28 22:04:10] PROGRESS 38% | 112 fps | 3.9x | file ETA 6m | QUEUE: 411 left, ETA ~41h 20m (5 nights) | CPU 34% | GPU 91%
 [2026-10-28 22:11:30] DONE saved 1.9GB (45%) | verify OK | original deleted | total saved 1.9GB
-[2026-10-29 07:00:00] Window closed. This run: 38 done, 1 failed, 0 no savings, saved 61.2GB | ...
+[2026-10-29 07:00:00] Window closed. This run: 38 done, 1 failed, 0 not smaller, saved 61.2GB | ...
 ```
 
 Queue ETA = remaining media seconds ÷ rolling encode speed (media seconds per wall second over the last 10 files
 plus the current one), and the number of schedule windows that takes. `LOG_LEVEL=DEBUG` also logs the full ffmpeg
 command line.
+
+Progress = the larger of ffmpeg's `out_time` and *video frames ÷ source fps*. ffmpeg 7 reports `out_time=N/A`
+(shown as 0 % and 0.0x before) until **every** output stream has written a packet, and afterwards the time of the
+stream that is furthest behind. A copied subtitle track whose first line comes late, or an empty one, kept old
+versions at "0% | 131 fps | 0.0x" while the video encoded fine. The watchdog only treats a job as stuck when the
+frame count stands still too.
 
 ---
 
@@ -283,10 +304,11 @@ The GPU: `/dev/dri` device + `group_add: ["993"]` (the host's `render` group, `g
 |---|---|
 | `qsv-test.sh` fails, "Failed to initialise VAAPI" / "Permission denied" | `ls -ln /dev/dri` on the host; the render device group must match `group_add` (993). Check `docker exec encody id` shows 993. |
 | `vainfo` lists no `VAProfileAV1` | Host kernel too old for Arc (needs 6.2+), or `i915`/`xe` not loaded. `dmesg | grep -i -E "i915|xe"`. Jellyfin AV1 transcoding failing too points to the host. |
-| Encode works but slow (< 50 fps at 1080p) | Run `intel_gpu_top`: if *Video* is idle, it is falling back. Most decode is done on the CPU (more robust); 4K HEVC sources are CPU-bound on decode. |
+| Encode works but slow (< 50 fps at 1080p) | Run `intel_gpu_top`: if *Video* is idle, it is falling back. Check the `decode=` part of the `START` line: `cpu` means the source cannot be GPU-decoded (Xvid, 10-bit H.264) or *Decode on the GPU* is off; a `HW DECODE failed` line means GPU decode failed for that file. `qsv-test.sh` also tests GPU decode. |
+| Animated titles get the movie/TV quality | Log after *Scan now*: `Jellyfin genre lookup failed ... HTTP 401` = wrong API key (test with the curl line under Integrations); `none of its N animated titles are under Encody's media folders` = Jellyfin uses other paths; `0 animated` = the genres are missing in Jellyfin. *Detect animation* must be on. |
 | Download cleanup keeps a torrent | *Downloads* tab, *Why* column. "add a path mapping": Sonarr/Radarr use other paths than `/data/media*`. "could not reach Transmission": wrong URL, or Encody is not on Transmission's Docker network (behind a VPN container, use that container's name). |
 | Files never get picked up | *Failed / skipped* tab shows the reason. Most common: hardlinked (still seeding), modified recently, below minimum size. |
-| Everything "no savings" | Quality number too low (= high quality). Raise it by 2-4. |
+| Everything "not smaller" | Quality number too low (= high quality), or efficient sources (HEVC ~2 Mbps). Raise the quality number by 2-4, or add `hevc` to *Also skip these source codecs*. |
 | "only X free on the drive" | Free up space on that drive; the file is retried after the next scan. |
 | Login loop behind Cloudflare Access | Basic auth and Access both work; make sure Traefik passes the `Authorization` header (it does by default). |
 | UI says "Connection problem" | `docker logs encody`; `curl http://<container>:8080/health`. |

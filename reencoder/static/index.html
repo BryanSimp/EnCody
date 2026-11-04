@@ -45,7 +45,7 @@
   <p><button id="retry-all">Retry all failed</button></p>
   <h3>Failed</h3>
   <table><thead><tr><th>File</th><th>Size</th><th>Tries</th><th>Reason</th><th></th></tr></thead><tbody id="failed"></tbody></table>
-  <h3>No savings</h3>
+  <h3>Not smaller (skipped, original kept)</h3>
   <table><thead><tr><th>File</th><th>Size</th><th>Reason</th><th></th></tr></thead><tbody id="nosave"></tbody></table>
   <h3>Skipped</h3>
   <table><thead><tr><th>File</th><th>Size</th><th>Reason</th></tr></thead><tbody id="skipped"></tbody></table>
@@ -84,6 +84,10 @@
     <label>Bit depth <select name="bit_depth"><option value="auto">Match source</option><option value="10">Always 10-bit</option><option value="8">8-bit (HDR is always 10-bit)</option></select></label>
     <label><input type="checkbox" name="convert_to_mkv"> Also convert container to MKV (remuxes files already in the target codec too)</label>
     <label>GPU render device <input name="render_device"></label>
+    <label><input type="checkbox" name="hw_decode"> Decode on the GPU too (QSV). Falls back to CPU decoding for that file if the GPU decode fails.
+      <small>H.264, HEVC (8/10-bit), AV1, VP9, MPEG-2, VC-1. Xvid/DivX, WMV and 10-bit H.264 are always CPU-decoded.</small></label>
+    <label>Stuck job watchdog: kill ffmpeg after N minutes without progress (0 = off) <input name="stall_minutes" type="number" min="0" max="1440">
+      <small>Progress = output time or video frames. Paused time does not count. The file is marked failed (Retry puts it back).</small></label>
     <label>Concurrent jobs <input name="concurrent_jobs" type="number" min="1" max="4"></label>
     <p class="hint">Audio, subtitles, attachments and chapters are always copied (<code>-map 0</code>).</p>
   </fieldset>
@@ -104,7 +108,8 @@
     <label>Duration tolerance (seconds) <input name="duration_tol_sec" type="number" step="0.1"></label>
     <label>Duration tolerance (%) <input name="duration_tol_pct" type="number" step="0.1">
       <small>The larger of the two is used.</small></label>
-    <label>Require at least N% savings <input name="min_savings_pct" type="number"></label>
+    <label>Require at least N% savings <input name="min_savings_pct" type="number" min="0" max="99">
+      <small>An output that is not at least this much smaller is discarded and the file is skipped ("not smaller").</small></label>
     <label><input type="checkbox" name="decode_test"> Quick decode test of the output</label>
     <label>Decode test: first N seconds <input name="decode_head_sec" type="number"></label>
     <label>Decode test: last N seconds <input name="decode_tail_sec" type="number"></label>

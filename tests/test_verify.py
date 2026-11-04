@@ -47,10 +47,18 @@ def test_size_check(s):
     r = verify.check(ORIG, out(), 1000, 1000, s, 0)
     assert not r.ok and r.no_savings
     r = verify.check(ORIG, out(), 1000, 1200, s, 0)
-    assert not r.ok and r.no_savings
+    assert not r.ok and r.no_savings and r.reason == "not smaller: output is 20.0% bigger, need 5%"
+    r = verify.check(ORIG, out(), 1000, 960, s, 0)
+    assert r.reason == "not smaller: output only 4.0% smaller, need 5%"
     assert not verify.check(ORIG, out(), 1000, 960, s, 0).ok   # only 4% smaller
     assert verify.check(ORIG, out(), 1000, 950, s, 0).ok       # exactly 5%
 
 
 def test_remux_skips_size_check(s):
     assert verify.check(ORIG, out(), 1000, 1010, s, 0, remux=True).ok
+
+
+def test_default_needs_10_percent(s):
+    assert s["min_savings_pct"] == 10
+    assert not verify.check(ORIG, out(), 1000, 901, s, 0).ok   # 9.9% smaller: discarded
+    assert verify.check(ORIG, out(), 1000, 900, s, 0).ok
