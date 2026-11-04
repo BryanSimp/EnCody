@@ -48,6 +48,19 @@ def _duration(data):
     return 0.0
 
 
+def frame_rate(v):
+    """Average frame rate of a video stream (0.0 if unknown)."""
+    for key in ("avg_frame_rate", "r_frame_rate"):
+        num, _, den = str(v.get(key) or "").partition("/")
+        try:
+            fps = float(num) / float(den or 1)
+        except (ValueError, ZeroDivisionError):
+            continue
+        if 0 < fps < 1000:
+            return round(fps, 3)
+    return 0.0
+
+
 def main_video_index(streams):
     """Index among video streams of the first real video (not cover art)."""
     vids = [s for s in streams if s.get("codec_type") == "video"]
@@ -74,6 +87,7 @@ def summarize(data):
         "width": int(v.get("width") or 0),
         "height": int(v.get("height") or 0),
         "pix_fmt": pix,
+        "fps": frame_rate(v),
         "ten_bit": any(x in pix for x in ("10", "12")),
         "hdr": v.get("color_transfer") in HDR_TRANSFERS,
         "dv": (v.get("codec_tag_string") in DV_TAGS) or any("DOVI" in s for s in side),

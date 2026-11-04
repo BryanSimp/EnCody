@@ -61,7 +61,7 @@ async function refreshState() {
 
   $("#jobs").innerHTML = st.jobs.map((j) => `
     <div class="job">
-      <div><b>${esc(j.display)}</b> <span class="muted">${esc(j.codec)} ${esc(j.res)} ${bytes(j.size)}${j.remux ? " (remux)" : ""}</span></div>
+      <div><b>${esc(j.display)}</b> <span class="muted">${esc(j.codec)} ${esc(j.res)} ${bytes(j.size)}${j.remux ? " (remux)" : ` | decode: ${esc(j.decode === "cpu" ? "CPU" : j.decode)}`}</span></div>
       <div class="bar"><div style="width:${j.percent}%"></div></div>
       <div class="muted">${j.phase === "verifying" ? "verifying..." : `${j.percent}% | ${Math.round(j.fps)} fps | ${j.speed.toFixed(1)}x | file ETA ${dur(j.eta)}`}${st.jellyfin_busy ? " | PAUSED (Jellyfin)" : st.throttled ? ` | throttled ${st.settings.daytime_limit_pct}%` : ""}</div>
     </div>`).join("");

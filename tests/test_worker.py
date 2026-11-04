@@ -1,4 +1,6 @@
 import datetime as dt
+import sys
+import threading
 import time
 
 from reencoder.db import DB
@@ -76,3 +78,47 @@ def test_window_end_finish(tmp_path, monkeypatch):
     w.jobs = {"/x": job}
     w.tick(dt.datetime(2026, 10, 29, 7, 0, 1))
     assert not job.encode.aborted
+
+
+def running_job(w):
+    job = fake_job(w)
+    job.encode = Encode([sys.executable, "-c", "import time; time.sleep(30)"], 100)
+    t = threading.Thread(target=job.encode.run, daemon=True)
+    t.start()
+    for _ in range(200):
+        if job.encode.running():
+            break
+        time.sleep(0.01)
+    return job, t
+
+
+def test_watchdog_kills_stalled_job(tmp_path, monkeypatch):
+    w, _ = make_worker(tmp_path, monkeypatch)
+    job, t = running_job(w)
+    s = w.db.settings()
+    assert s["stall_minutes"] == 10
+    job.encode.active_seconds = lambda: 599          # 9 min 59 s without progress: keep going
+    w._watchdog(s, [job])
+    assert not job.stalled and job.encode.running()
+    job.encode.active_seconds = lambda: 600
+    w._watchdog(s, [job])
+    t.join(5)
+    assert job.stalled and job.encode.aborted and not job.encode.running()
+
+
+def test_watchdog_off_and_progress_and_stopped(tmp_path, monkeypatch):
+    w, _ = make_worker(tmp_path, monkeypatch, stall_minutes=0)
+    job, t = running_job(w)
+    job.encode.active_seconds = lambda: 10_000
+    w._watchdog(w.db.settings(), [job])               # 0 = off
+    assert not job.stalled
+    s = dict(w.db.settings(), stall_minutes=10)
+    job.encode.feed("frame=5")                        # frames advanced just now
+    w._watchdog(s, [job])
+    assert not job.stalled
+    job.stop_reason = "stopped by user"               # already being stopped: not a stall
+    job.encode.active_seconds = lambda: 20_000
+    w._watchdog(s, [job])
+    assert not job.stalled
+    job.encode.abort()
+    t.join(5)

@@ -1,6 +1,7 @@
 """End-to-end: real ffmpeg, software AV1 (no GPU needed)."""
 import os
 import signal
+import sys
 import time
 
 import pytest
@@ -97,10 +98,73 @@ def test_truncated_output_rejected(setup, monkeypatch):
 
 def test_no_savings_marks_file(setup):
     src, db, w = setup
+    before = open(src, "rb").read()
     db.set_settings({"min_savings_pct": 99})
-    run_one(w, db)
-    assert db.file(src)["status"] == "no_savings"
+    job = run_one(w, db)
+    row = db.file(src)
+    assert row["status"] == "no_savings" and row["reason"].startswith("not smaller: ")
+    assert db.counts()["skipped"] == 1                       # shown as skipped
+    assert open(src, "rb").read() == before and not os.path.exists(job.tmp)
     assert w._next_job(db.settings()) is None
+    w._scan(db.settings())                                   # stays skipped, not re-queued
+    assert db.file(src)["status"] == "no_savings"
+
+
+def fake_ffmpeg(code):
+    """A stand-in ffmpeg: prints an error, then exits with `code` (None = hang)."""
+    body = "import sys, time; sys.stderr.write('fake qsv error\\n'); sys.stderr.flush(); "
+    body += "time.sleep(60)" if code is None else f"sys.exit({code})"
+    return [sys.executable, "-c", body]
+
+
+def test_hw_decode_failure_falls_back_to_cpu(setup, monkeypatch, logs):
+    src, db, w = setup
+    real = encoder.build_cmd
+    calls = []
+
+    def build(*a, hw_decode=True, **kw):
+        calls.append(hw_decode)
+        return fake_ffmpeg(1) if hw_decode else real(*a, hw_decode=hw_decode, **kw)
+
+    monkeypatch.setattr(worker_mod.encoder, "hw_decoder", lambda p, s: "h264_qsv")
+    monkeypatch.setattr(worker_mod.encoder, "build_cmd", build)
+    job = run_one(w, db)
+    assert calls == [True, False]
+    assert db.file(src)["status"] == "done" and media.probe(src)["codec"] == "av1"
+    assert job.decoder is None
+    assert any("HW DECODE failed (h264_qsv)" in m and "fake qsv error" in m and "retrying with CPU decode" in m
+               for _, m in logs)
+    assert any("decode=h264_qsv" in m for _, m in logs if m.startswith("START"))
+
+
+def test_cpu_failure_is_not_retried(setup, monkeypatch):
+    src, db, w = setup
+    calls = []
+    monkeypatch.setattr(worker_mod.encoder, "build_cmd", lambda *a, **kw: calls.append(1) or fake_ffmpeg(1))
+    run_one(w, db)
+    assert calls == [1] and db.file(src)["status"] == "todo" and db.file(src)["failures"] == 1
+
+
+def test_stalled_job_is_killed_and_failed(setup, monkeypatch):
+    src, db, w = setup
+    before = open(src, "rb").read()
+    monkeypatch.setattr(worker_mod.encoder, "hw_decoder", lambda p, s: "h264_qsv")   # no CPU retry after a stall
+    monkeypatch.setattr(worker_mod.encoder, "build_cmd", lambda *a, **kw: fake_ffmpeg(None))
+
+    def stall(job):
+        for _ in range(300):
+            if job.encode and job.encode.running() and job.encode.stderr:
+                break
+            time.sleep(0.01)
+        job.encode.active_seconds = lambda: 11 * 60      # 11 min without progress
+        w._watchdog(db.settings(), [job])
+
+    job = run_one(w, db, before_wait=stall)
+    row = db.file(src)
+    assert row["status"] == "failed" and row["failures"] == 1   # failed now, although max_failures is 2
+    assert row["reason"].startswith("stalled: no progress for 10 min at 0%") and "fake qsv error" in row["reason"]
+    assert open(src, "rb").read() == before and not os.path.exists(job.tmp)
+    assert db.history()[0]["result"] == "failed"
 
 
 def test_restart_recovery(setup):
